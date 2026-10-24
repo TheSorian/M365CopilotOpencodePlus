@@ -1208,20 +1208,29 @@ export async function handleChatCompletion(
 
       // Synthetic proxy status, NOT model reasoning. Keep it out of content
       // and tool arguments. Clients without reasoning_content support ignore it.
+      // Preserve the waiting indicator on tool-capable turns too. Its
+      // reasoning segment ends at the first upstream output, before a
+      // recognised tool header starts native tool input.
       const waitingEnabled = process.env.M365_WAIT_INDICATOR !== "0" &&
         ["Gpt_6_Sol_Reasoning", "Gpt_61_Sol_Reasoning"].includes(tone);
       let waitingTicks = 0;
+      let waitingElapsedTicks = 0;
+      let upstreamOutputStarted = false;
       const waitingTimer = waitingEnabled ? setInterval(() => {
-        if (opts.signal?.aborted || sent.length > 0 || waitingTicks >= 40) return;
+        if (opts.signal?.aborted || upstreamOutputStarted || startedTool || sent.length > 0 || waitingTicks >= 120) return;
+        // Show Thinking only after two seconds of uninterrupted waiting.
+        // Fast responses go straight to prose/tool input without a flash.
+        // Once visible, keep adding one dot per second.
+        if (++waitingElapsedTicks < 2) return;
         const status = waitingTicks++ === 0
-          ? "El modelo está pensando internamente..."
+          ? "El modelo está pensando internamente."
           : ".";
         try {
           send({ ...base, choices: [{
             index: 0, delta: { reasoning_content: status }, finish_reason: null,
           }] });
         } catch {}
-      }, 3000) : undefined;
+      }, 1000) : undefined;
 
       // Stream only an irrevocably safe prose prefix. Keep potential image
       // payloads, tool fences and fabricated results buffered for final parsing.
@@ -1229,10 +1238,29 @@ export async function handleChatCompletion(
       let sent = "";
       let pending = "";
       let blocked = false;
+      let startedTool: { id: string; name: string } | undefined;
       const markers = ["data:" + "image/", "iVBORw0KGgo", "/9j/", "UklGR", "!["];
       if (hasTools) markers.push("<tool_", "<invoke", "<function");
       const toolFenceNames = hasTools ? [...buildSpecMap(body.tools ?? []).keys()] : [];
+      const streamEverActed = body.messages.some(
+        message => message.role === "assistant" &&
+          Array.isArray(message.tool_calls) && message.tool_calls.length > 0,
+      );
       const liveDelta = (delta: string) => {
+        if (delta && !upstreamOutputStarted) {
+          upstreamOutputStarted = true;
+          if (waitingTimer !== undefined) clearInterval(waitingTimer);
+          // OpenAI-compatible clients end an open reasoning segment when
+          // tool_calls is present, including an empty array. Close the
+          // synthetic waiting segment as soon as upstream output starts,
+          // even while a split tool header is still being classified.
+          // This announces no tool and commits no executable arguments.
+          if (waitingTicks > 0) {
+            send({ ...base, choices: [{
+              index: 0, delta: { tool_calls: [] }, finish_reason: null,
+            }] });
+          }
+        }
         if (!delta || blocked) return;
         pending += delta;
         if (couldBePriorityAccessPrefix(pending)) return;
@@ -1240,7 +1268,7 @@ export async function handleChatCompletion(
         // Do not expose such a draft before the existing checks have judged it.
         if (hasTools && (
           looksLikeConfabulation(pending) ||
-          looksLikeHallucinatedCompletion(pending) ||
+          (!streamEverActed && looksLikeHallucinatedCompletion(pending)) ||
           looksLikeRemoteArtifactCompletion(pending)
         )) {
           blocked = true;
@@ -1261,9 +1289,29 @@ export async function handleChatCompletion(
           for (const match of pending.matchAll(fences)) {
             const name = match[1];
             const incomplete = match[3] === "";
-            if (name && toolFenceNames.includes(name)) {
+            if (!incomplete && name && toolFenceNames.includes(name)) {
               end = Math.min(end, match.index!);
               blocked = true;
+              // Start a real tool-input stream, not a synthetic status message.
+              // Announce opening command/editing fences through native tool
+              // input events. Arguments remain buffered and validated.
+              const spec = buildSpecMap(body.tools ?? []).get(name);
+              if (!startedTool && spec &&
+                  ["bash", "shell", "sh", "zsh", "run", "exec", "execute", "command", "cmd", "terminal", "run_command", "run_terminal_cmd", "execute_command", "execute_bash", "shell_exec", "system", "patch", "apply_patch", "edit", "write", "edit_file", "write_file"].includes(spec.name) &&
+                  pending.slice(0, match.index).trim() === "") {
+                startedTool = {
+                  id: `call_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`,
+                  name: spec.name,
+                };
+                send({ ...base, choices: [{
+                  index: 0,
+                  delta: { tool_calls: [{
+                    index: 0, id: startedTool.id, type: "function",
+                    function: { name: startedTool.name, arguments: "" },
+                  }] },
+                  finish_reason: null,
+                }] });
+              }
               break;
             }
             if (incomplete && toolFenceNames.some(tool => tool.startsWith(name))) {
@@ -1300,6 +1348,15 @@ export async function handleChatCompletion(
       let p: Produced;
       try { p = await produce(liveDelta); }
       catch (err: any) { p = { kind: "error", resp: jsonResponse(502, { error: { message: err?.message ?? "stream error", type: "upstream_error" } }) }; }
+      // Never change a tool's identity after announcing it. A rewritten call
+      // or divergent final snapshot must fail rather than execute the wrong tool.
+      if (startedTool && p.kind !== "error" &&
+          (p.kind !== "tools" || p.toolCalls[0]?.function.name !== startedTool.name)) {
+        p = { kind: "error", resp: jsonResponse(502, { error: {
+          message: "The final response changed an announced tool call. No tool arguments were committed; retry the request.",
+          type: "tool_stream_mismatch",
+        } }) };
+      }
       clearInterval(hb);
       if (waitingTimer !== undefined) clearInterval(waitingTimer);
       try {
@@ -1323,7 +1380,17 @@ export async function handleChatCompletion(
         } else if (p.kind === "tools") {
           p.toolCalls.forEach((tc, i) => {
             log.debug(`Tool call: ${tc.function.name} ${trunc(tc.function.arguments, 200)}`);
-            send({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: i, id: tc.id, type: "function", function: { name: tc.function.name, arguments: tc.function.arguments } }] }, finish_reason: null }] });
+            if (i === 0 && startedTool) {
+              send({ ...base, choices: [{
+                index: 0,
+                delta: { tool_calls: [{
+                  index: 0, function: { arguments: tc.function.arguments },
+                }] },
+                finish_reason: null,
+              }] });
+            } else {
+              send({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: i, id: tc.id, type: "function", function: { name: tc.function.name, arguments: tc.function.arguments } }] }, finish_reason: null }] });
+            }
           });
           send({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], ...(includeUsage ? { usage: usage() } : {}) });
         } else {

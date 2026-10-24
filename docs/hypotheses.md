@@ -5612,6 +5612,25 @@ signal. Live check, premium account, no turn sent (reserve set above capacity): 
 waited on keepalives, an unstreamed one queued behind it got its 429 at 2.0 min (`Retry-After` 278 s,
 both turns' refill), and a client that hung up at 22 s had left the line ("behind 1 other request", not 2).
 
+## Oct 24 2026 — conversation progress across transport recreation
+
+Hypothesis: recreating `CopilotSession` with the same conversation ID but a zero
+local counter can contribute to context loss by sending `isStartOfSession:true`
+on a continuation. Code inspection confirms the counter reset on reconnect,
+agent changes, and explicit reset; it does not establish that this caused the
+reported missing-task incident. No debug capture exists for that incident.
+
+Preserve the local attempted-turn count across transport recreation and clear
+it only for a new conversation ID. Offline regression tests cover reconnect,
+reset, and fresh-conversation boundaries. These count attempts, not confirmed
+server turns. Live impact remains unverified.
+
+Falsification/probe: capture a controlled reconnect after a successful turn and
+check the outgoing start flag and recall of an earlier unique task marker.
+If recall still fails with the flag false, investigate server routing/state
+and history selection separately. Do not replace delta continuations with
+unconditional full-history replay.
+
 ## 38. Oct 14 2026 — a content-less `InternalError` drops the turn; "Please continue." loses the request
 
 Seen driving the proxy from T3 Code (Claude Code via cli-proxy-api), `Gpt_6_Sol_Reasoning`, on a

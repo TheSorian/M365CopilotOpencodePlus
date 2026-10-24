@@ -1356,14 +1356,28 @@ describe("incremental streaming with workspace tools", () => {
     function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } },
   }];
 
-  async function collect(deltas: string[]) {
+  async function collect(deltas: string[], continued = false, requestTools: unknown[] = tools) {
     scripted.result = null;
     scripted.queue = [];
     scripted.deltas = deltas;
     scripted.fullText = undefined;
     const response = await handleChatCompletion(ChatCompletionRequest.parse({
-      model: "gpt-6.1-sol", stream: true, tools,
-      messages: [{ role: "user", content: "Inspect the project." }],
+      model: "gpt-6.1-sol", stream: true, tools: requestTools,
+      messages: [
+        { role: "user", content: "Inspect the project." },
+        ...(continued ? [
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call_previous",
+              type: "function",
+              function: { name: "bash", arguments: "{\"command\":\"pwd\"}" },
+            }],
+          },
+          { role: "tool", tool_call_id: "call_previous", content: "/project" },
+        ] : []),
+      ],
     }), new SessionPool());
     const chunks = (await response.text()).split("\n")
       .filter(line => line.startsWith("data: ") && line !== "data: [DONE]")
@@ -1390,15 +1404,114 @@ describe("incremental streaming with workspace tools", () => {
     expect(content.join("")).toBe(deltas.join(""));
   });
 
+  it("keeps streaming a deployment summary after actual tool use and an inline filename", async () => {
+    const deltas = [
+      "Previously deployed 27-event catalog, shop server UI improvements, and OP Roles pre-round weighting/restoration fixes.\n",
+      "Implemented and deployed event IDs 1–27, persisted in `eventos",
+      ".json`.\n",
+      "The identifiers remain stable across restarts. ",
+      "The configuration preserves all 27 events.",
+    ];
+    const chunks = await collect(deltas, true);
+    const content = chunks.map(chunk => chunk.choices?.[0]?.delta?.content).filter(Boolean);
+    expect(content.join("")).toBe(deltas.join(""));
+    expect(content).toContain(".json`.\n");
+    expect(content).toContain("The identifiers remain stable across restarts. ");
+    expect(content).toContain("The configuration preserves all 27 events.");
+    expect(chunks.flatMap(chunk => chunk.choices?.[0]?.delta?.tool_calls ?? [])).toHaveLength(0);
+  });
+
   it("never streams a raw tool fence split across upstream deltas", async () => {
     const chunks = await collect(["`", "``ba", "sh\n", "pwd", "\n```"]);
     const content = chunks.map(chunk => chunk.choices?.[0]?.delta?.content ?? "").join("");
     expect(content).toBe("");
     const calls = chunks.flatMap(chunk => chunk.choices?.[0]?.delta?.tool_calls ?? []);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0].function.name).toBe("bash");
-    expect(JSON.parse(calls[0].function.arguments).command).toBe("pwd");
+    expect(calls[0].function.arguments).toBe("");
+    expect(calls[0].id).toMatch(/^call_/);
+    expect(calls[1].index).toBe(0);
+    expect(calls[1].id).toBeUndefined();
+    expect(calls[1].function.name).toBeUndefined();
+    expect(JSON.parse(calls.map(call => call.function.arguments).join("")).command).toBe("pwd");
+    expect(chunks.some(chunk => chunk.choices?.[0]?.delta?.reasoning_content)).toBe(false);
   });
+
+  it("waits for the complete shell header before starting native tool input", async () => {
+    const chunks = await collect(["```bash", "\n", "pwd", "\n```"]);
+    const calls = chunks.flatMap(chunk => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].function).toEqual({ name: "bash", arguments: "" });
+    expect(JSON.parse(calls[1].function.arguments)).toEqual({ command: "pwd" });
+    expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+  });
+
+  it("does not start native tool input for a longer ordinary fence name", async () => {
+    const deltas = ["```bash", "-example\n", "pwd\n", "```"];
+    const chunks = await collect(deltas);
+    expect(chunks.flatMap(chunk => chunk.choices?.[0]?.delta?.tool_calls ?? [])).toHaveLength(0);
+    expect(chunks.map(chunk => chunk.choices?.[0]?.delta?.content ?? "").join("")).toBe(deltas.join(""));
+  });
+
+  for (const fence of ["shell", "bash", "sh"]) {
+    it(`starts native shell input for a ${fence} fence when the harness tool is shell`, async () => {
+      const requestTools = [{
+        type: "function",
+        function: {
+          name: "shell",
+          parameters: {
+            type: "object",
+            properties: { command: { type: "string" } },
+          },
+        },
+      }];
+      const chunks = await collect(["``", "`" + fence, "\n", "pwd", "\n```"], false, requestTools);
+      const calls = chunks.flatMap(chunk => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+      expect(calls).toHaveLength(2);
+      expect(calls[0].function).toEqual({ name: "shell", arguments: "" });
+      expect(calls[0].id).toMatch(/^call_/);
+      expect(calls[1].index).toBe(0);
+      expect(calls[1].id).toBeUndefined();
+      expect(calls[1].function.name).toBeUndefined();
+      expect(JSON.parse(calls[1].function.arguments)).toEqual({ command: "pwd" });
+      expect(chunks.map(chunk => chunk.choices?.[0]?.delta?.content ?? "").join("")).toBe("");
+      expect(chunks.some(chunk => chunk.choices?.[0]?.delta?.reasoning_content)).toBe(false);
+      expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+    });
+  }
+
+  for (const name of ["patch", "apply_patch", "edit", "write", "edit_file", "write_file"]) {
+    it(`starts native ${name} input before delivering validated arguments`, async () => {
+      const patchTool = name === "patch" || name === "apply_patch";
+      const properties = patchTool
+        ? { patchText: { type: "string" } }
+        : { filePath: { type: "string" }, content: { type: "string" } };
+      const requestTools = [{
+        type: "function",
+        function: { name, parameters: { type: "object", properties } },
+      }];
+      const body = patchTool
+        ? "*** Begin Patch\n*** Add File: example.txt\n+hello\n*** End Patch"
+        : "filePath: example.txt\n\nhello";
+      const chunks = await collect(["``", "`" + name, "\n", body, "\n```"], false, requestTools);
+      const calls = chunks.flatMap(chunk => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+      expect(calls).toHaveLength(2);
+      expect(calls[0].function).toEqual({ name, arguments: "" });
+      expect(calls[0].id).toMatch(/^call_/);
+      expect(calls[1].index).toBe(0);
+      expect(calls[1].id).toBeUndefined();
+      expect(calls[1].function.name).toBeUndefined();
+      const args = JSON.parse(calls[1].function.arguments);
+      if (patchTool) expect(args.patchText).toBe(body);
+      else {
+        expect(args.filePath).toBe("example.txt");
+        expect(args.content).toBe("hello");
+      }
+      expect(chunks.map(chunk => chunk.choices?.[0]?.delta?.content ?? "").join("")).toBe("");
+      expect(chunks.some(chunk => chunk.choices?.[0]?.delta?.reasoning_content)).toBe(false);
+      expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+    });
+  }
 
   it("continues streaming after an ordinary code example with a split header", async () => {
     const deltas = [
@@ -1558,11 +1671,13 @@ describe("synthetic proxy waiting indicator", () => {
     }
   });
 
-  async function silentTurn(model: string, disabled = false) {
+  async function silentTurn(model: string, disabled = false, toolTurn = false, waitMs = 10_000) {
     scripted.queue = [];
     scripted.result = null;
-    scripted.deltas = ["Respuesta real."];
-    scripted.fullText = "Respuesta real.";
+    scripted.deltas = toolTurn
+      ? ["`", "``sh", "ell", "\n", "pwd", "\n```"]
+      : ["Respuesta real."];
+    scripted.fullText = scripted.deltas.join("");
     let release!: () => void;
     scripted.gate = new Promise<void>(resolve => { release = resolve; });
     const previous = process.env.M365_WAIT_INDICATOR;
@@ -1572,9 +1687,16 @@ describe("synthetic proxy waiting indicator", () => {
     try {
       const pending = handleChatCompletion(ChatCompletionRequest.parse({
         model, stream: true,
+        ...(toolTurn ? { tools: [{
+          type: "function",
+          function: {
+            name: "shell",
+            parameters: { type: "object", properties: { command: { type: "string" } } },
+          },
+        }] } : {}),
         messages: [{ role: "user", content: "Describe the project." }],
       }), new SessionPool()).then(response => response.text());
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(waitMs);
       release();
       const text = await pending;
       const chunks = text.split("\n")
@@ -1598,8 +1720,13 @@ describe("synthetic proxy waiting indicator", () => {
       const chunks = await silentTurn(model);
       const reasoning = chunks.map(c => c.choices?.[0]?.delta?.reasoning_content ?? "").join("");
       const content = chunks.map(c => c.choices?.[0]?.delta?.content ?? "").join("");
-      expect(reasoning).toContain("El modelo est\u00e1 pensando internamente...");
-      expect(reasoning).toContain("....");
+      const statuses = chunks
+        .map(c => c.choices?.[0]?.delta?.reasoning_content)
+        .filter(status => status !== undefined);
+      expect(statuses).toHaveLength(9);
+      expect(statuses[0]).toBe("El modelo est\u00e1 pensando internamente.");
+      expect(statuses.slice(1)).toEqual(Array(8).fill("."));
+      expect(reasoning).toBe("El modelo est\u00e1 pensando internamente" + ".".repeat(9));
       expect(content).toBe("Respuesta real.");
       expect(chunks.at(-1).choices[0].finish_reason).toBe("stop");
     });
@@ -1608,6 +1735,47 @@ describe("synthetic proxy waiting indicator", () => {
   it("can be disabled explicitly", async () => {
     const chunks = await silentTurn("gpt-6.1-sol", true);
     expect(chunks.some(c => c.choices?.[0]?.delta?.reasoning_content)).toBe(false);
+  });
+
+  it("ends waiting reasoning before starting native input for a split shell header", async () => {
+    const chunks = await silentTurn("gpt-6.1-sol", false, true);
+    const boundary = chunks.findIndex(c =>
+      Array.isArray(c.choices?.[0]?.delta?.tool_calls) &&
+      c.choices[0].delta.tool_calls.length === 0);
+    const start = chunks.findIndex(c =>
+      c.choices?.[0]?.delta?.tool_calls?.[0]?.function?.name === "shell");
+    expect(boundary).toBeGreaterThan(0);
+    expect(start).toBeGreaterThan(boundary);
+    expect(chunks.slice(0, boundary).filter(c =>
+      c.choices?.[0]?.delta?.reasoning_content !== undefined)).toHaveLength(9);
+    expect(chunks.slice(boundary).some(c =>
+      c.choices?.[0]?.delta?.reasoning_content !== undefined)).toBe(false);
+    const calls = chunks.flatMap(c => c.choices?.[0]?.delta?.tool_calls ?? []);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].function).toEqual({ name: "shell", arguments: "" });
+    expect(JSON.parse(calls[1].function.arguments)).toEqual({ command: "pwd" });
+    expect(chunks.map(c => c.choices?.[0]?.delta?.content ?? "").join("")).toBe("");
+    expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+  });
+
+  for (const waitMs of [100, 1900]) {
+    it(`skips Thinking when native tool output starts after ${waitMs}ms`, async () => {
+      const chunks = await silentTurn("gpt-6.1-sol", false, true, waitMs);
+      expect(chunks.some(c =>
+        c.choices?.[0]?.delta?.reasoning_content !== undefined)).toBe(false);
+      expect(chunks.some(c =>
+        c.choices?.[0]?.delta?.tool_calls?.[0]?.function?.name === "shell")).toBe(true);
+      expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+    });
+  }
+
+  it("shows Thinking at the two-second threshold", async () => {
+    const chunks = await silentTurn("gpt-6.1-sol", false, true, 2000);
+    const statuses = chunks
+      .map(c => c.choices?.[0]?.delta?.reasoning_content)
+      .filter(status => status !== undefined);
+    expect(statuses).toEqual(["El modelo est\u00e1 pensando internamente."]);
+    expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
   });
 
   it("does not add synthetic reasoning to other models", async () => {
