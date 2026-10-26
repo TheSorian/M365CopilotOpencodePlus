@@ -1577,7 +1577,7 @@ describe("incremental streaming with workspace tools", () => {
 });
 
 describe("workspace framing on continued tool turns", () => {
-  it("refreshes workspace instructions and tool definitions without rotating the thread", async () => {
+  it("keeps initial workspace framing without repeating it or rotating the thread", async () => {
     scripted.result = null;
     scripted.texts = [];
     scripted.newConversations = 0;
@@ -1606,8 +1606,11 @@ describe("workspace framing on continued tool turns", () => {
       );
       await post();
       expect(scripted.newConversations).toBe(0);
-      expect(scripted.texts[1]).toContain("WORKSPACE_REFRESH");
-      expect(scripted.texts[1]).toContain("bash");
+      expect(scripted.texts[0]).toContain("WORKSPACE_REFRESH");
+      expect(scripted.texts[0]).toContain("My workflow preferences for this task:");
+      expect(scripted.texts[1]).not.toContain("WORKSPACE_REFRESH");
+      expect(scripted.texts[1]).not.toContain("My workflow preferences for this task:");
+      expect(scripted.texts[1]).not.toContain("Before the task, a note on how we'll work:");
       expect(scripted.texts[1]).toContain('<tool_response tool="bash"');
     } finally {
       scripted.queue = [];
@@ -1702,7 +1705,7 @@ describe("RESTORECONTEXT", () => {
 });
 
 describe("synthetic proxy waiting indicator", () => {
-  it("refreshes GPT-6 workflow preferences on first and continued tool turns only", async () => {
+  it("adds GPT-6 workflow preferences initially without repeating them on continued tool turns", async () => {
     const tools = [{
       type: "function",
       function: {
@@ -1734,9 +1737,14 @@ describe("synthetic proxy waiting indicator", () => {
           { role: "tool", tool_call_id: first.tool_calls[0].id, content: "/project" },
         );
         await post();
-        for (const prompt of scripted.texts) {
-          if (model === "claude-sonnet") {
+        expect(scripted.texts).toHaveLength(2);
+        for (const [index, prompt] of scripted.texts.entries()) {
+          if (model === "claude-sonnet" || index > 0) {
             expect(prompt).not.toContain("My workflow preferences for this task:");
+            expect(prompt).not.toContain("dedicated patch or editing tool");
+            if (index > 0) {
+              expect(prompt).not.toContain("Before the task, a note on how we'll work:");
+            }
           } else {
             expect(prompt).toContain("dedicated patch or editing tool");
             expect(prompt).toContain("[descriptive label](https://example.com/path)");

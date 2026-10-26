@@ -645,14 +645,9 @@ export async function handleChatCompletion(
     inputImages = imageUrls(newMessages);
     const delta = newMessages.length > 0 ? formatDeltaMessages(newMessages, body.messages) : "";
     if (delta.length > 0) {
-      // Refresh the actual harness instructions and available tool schemas on
-      // every continuation. The upstream thread is not the local workspace:
-      // access always comes through the tools supplied by this request.
-      const currentContext = formatMessages(
-        body.messages.filter(message => message.role === "system"),
-        body.tools, body.tool_choice, convId, framingVariant,
-      );
-      text = `${currentContext}\n\n${delta}`;
+      // The upstream conversation retains its initial framing, tool schemas
+      // and workflow preferences. Send only new messages on continuations.
+      text = delta;
       // Only a tool result is the thing the note corrects the model about.
       if (conv.pendingNote && newMessages.some((m) => m.role === "tool")) {
         text = `${conv.pendingNote}\n\n${text}`;
