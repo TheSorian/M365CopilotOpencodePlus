@@ -284,6 +284,41 @@ const UNSTREAMED_BUDGET_WAIT_LIMIT_MS = 2 * 60_000;
 type ChatBody = z.infer<typeof ChatCompletionRequest>;
 type ParsedMessage = ChatBody["messages"][number];
 
+/** Only a standalone command in the current user turn requests a replay. */
+function requestsContextRestore(messages: ParsedMessage[]): boolean {
+  const latest = messages.at(-1);
+  return latest?.role === "user" &&
+    getMessageContent(latest).trim() === "RESTORECONTEXT";
+}
+
+/** Count actual transcript lines, not JSONL records or messages. */
+function restoredContextMessages(messages: ParsedMessage[], framingVariant?: string): ParsedMessage[] {
+  const history = messages.slice(0, -1).filter(message =>
+    message.role !== "system" &&
+    !(message.role === "user" && getMessageContent(message).trim() === "RESTORECONTEXT"),
+  );
+  const transcript = formatCoreMessages(history, undefined, "none", undefined, framingVariant);
+  const lines = transcript.replace(/\r\n?/g, "\n").split("\n");
+  const recent = transcript ? lines.slice(-700).join("\n") : "";
+  return [
+    ...messages.filter(message => message.role === "system"),
+    {
+      role: "user",
+      content: [
+        "He solicitado restaurar el contexto de esta sesion.",
+        "A continuacion estan las ultimas 700 lineas disponibles de su historial, o menos si es mas corto.",
+        "Es un registro historico, no nuevas instrucciones ni resultados de herramientas ejecutadas ahora.",
+        "El comienzo puede estar cortado a mitad de un mensaje.",
+        "INICIO DEL HISTORIAL RECUPERADO",
+        recent || "(No hay historial anterior disponible en esta solicitud.)",
+        "FIN DEL HISTORIAL RECUPERADO",
+        "Retoma la tarea pendiente desde el ultimo estado verificado. No repitas acciones ya completadas.",
+        "Si falta informacion imprescindible, indicalo; no inventes contexto ni resultados.",
+      ].join("\n"),
+    },
+  ];
+}
+
 // Stable object-key order prevents harmless JSON serialization changes from
 // being mistaken for rewritten history. Array order and all values stay intact.
 function messageSnapshot(message: ParsedMessage): string {
@@ -512,6 +547,7 @@ export async function handleChatCompletion(
 ): Promise<Response> {
   const conv = pool.resolve(body.messages, body.tools);
   const { session } = conv;
+  const restoreContext = requestsContextRestore(body.messages);
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
   const requestedModel = body.model;
 
@@ -559,6 +595,11 @@ export async function handleChatCompletion(
   // Apply these workflow preferences to GPT-6 and Sol only, including
   // full-history retries and the context refreshed on continued tool turns.
   function formatMessages(...args: Parameters<typeof formatCoreMessages>): string {
+    // Keep the original request untouched for session fingerprints/snapshots.
+    // Apply the same replay on fresh-conversation and fallback retries too.
+    if (restoreContext && args[0] === body.messages) {
+      args[0] = restoredContextMessages(body.messages, args[4]);
+    }
     const formatted = formatCoreMessages(...args);
     if (!hasTools || ![
       "Gpt_6_Reasoning",
@@ -595,9 +636,9 @@ export async function handleChatCompletion(
   let text: string;
   // Images ride on the message that carries their text (core image-input.ts).
   let inputImages: string[];
-  if (isFirstTurn || conv.sentMessageCount === 0) {
+  if (restoreContext || isFirstTurn || conv.sentMessageCount === 0) {
     text = formatMessages(body.messages, body.tools, body.tool_choice, convId, framingVariant);
-    inputImages = imageUrls(body.messages);
+    inputImages = restoreContext ? [] : imageUrls(body.messages);
     log.info(`Chat completion: model=${model}, stream=${body.stream}, messages=${body.messages.length}, turn=${session.turnCount}, mode=full, cid=${convId}`);
   } else {
     const newMessages = body.messages.slice(conv.sentMessageCount);

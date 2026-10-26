@@ -47,6 +47,21 @@ On first use, the system creates a **Copilot Studio agent** with tool-calling in
 
 Each agent session reuses the same M365 conversation (same `sessionId` + `conversationId`). The WebSocket reconnects per turn but M365 maintains server-side context. This saves quota — the 600 message limit applies per-conversation.
 
+### Restore context manually
+
+Send `RESTORECONTEXT` as the entire user message to replay the last **700
+lines of the chat transcript available in the current request** and ask the
+model to resume the pending task. User messages, assistant replies, tool calls
+and tool results are included; current system instructions and tool definitions
+are sent separately and are not counted toward the 700-line limit.
+
+The command does not normally start a new upstream conversation, execute old
+tool calls, or enable disk logging. It works with streaming and non-streaming
+requests. Earlier occurrences of the command do not trigger another replay.
+If the client has already removed older messages, those messages cannot be
+recovered by this command. The first retained line may be mid-message, and
+700 lines are not a token limit or a guarantee of model recall.
+
 ## Packages
 
 ```

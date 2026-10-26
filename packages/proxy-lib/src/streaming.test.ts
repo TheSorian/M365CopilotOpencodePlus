@@ -1617,6 +1617,90 @@ describe("workspace framing on continued tool turns", () => {
 });
 
 
+describe("RESTORECONTEXT", () => {
+  afterEach(() => {
+    scripted.queue = [];
+    scripted.result = null;
+    resetAgentRoutes();
+  });
+
+  async function post(pool: InstanceType<typeof SessionPool>, messages: any[], stream = false) {
+    scripted.result = null;
+    scripted.queue = [{ fullText: "Context received." }];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-6.1-sol", stream, messages,
+    }), pool);
+    expect(response.status).toBe(200);
+    await response.text();
+    return scripted.texts.at(-1)!;
+  }
+
+  it("replays exactly the last 700 transcript lines and preserves current instructions", async () => {
+    const messages: any[] = [
+      { role: "system", content: "CURRENT_WORKSPACE_RULES" },
+      { role: "user", content: Array.from({ length: 900 }, (_, i) => `HISTORY_LINE_${i}`).join("\n") },
+      { role: "assistant", content: "LAST_VERIFIED_STATE" },
+      { role: "user", content: "  RESTORECONTEXT\n" },
+    ];
+    const original = JSON.stringify(messages);
+    const prompt = await post(new SessionPool(), messages);
+    const recovered = prompt.split("INICIO DEL HISTORIAL RECUPERADO\n")[1]
+      .split("\nFIN DEL HISTORIAL RECUPERADO")[0];
+    expect(recovered.split("\n")).toHaveLength(700);
+    expect(recovered).not.toContain("HISTORY_LINE_0\n");
+    expect(recovered).toContain("HISTORY_LINE_899");
+    expect(recovered).toContain("LAST_VERIFIED_STATE");
+    expect(prompt).toContain("CURRENT_WORKSPACE_RULES");
+    expect(JSON.stringify(messages)).toBe(original);
+  });
+
+  it("replays assistant tool calls and actual results on a continuation without rotating", async () => {
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: "ORIGINAL_TASK_MARKER" }];
+    await post(pool, messages);
+    const rotations = scripted.newConversations;
+    messages.push(
+      { role: "assistant", content: null, tool_calls: [{
+        id: "call-restore", type: "function",
+        function: { name: "bash", arguments: '{"command":"pwd"}' },
+      }] },
+      { role: "tool", tool_call_id: "call-restore", content: "REAL_WORKSPACE_RESULT" },
+      { role: "user", content: "RESTORECONTEXT" },
+    );
+    const prompt = await post(pool, messages, true);
+    expect(prompt).toContain("ORIGINAL_TASK_MARKER");
+    expect(prompt).toContain("pwd");
+    expect(prompt).toContain("REAL_WORKSPACE_RESULT");
+    expect(prompt).toContain("INICIO DEL HISTORIAL RECUPERADO");
+    expect(scripted.newConversations).toBe(rotations);
+    messages.push(
+      { role: "assistant", content: "Context received." },
+      { role: "user", content: "Continue normally." },
+    );
+    const next = await post(pool, messages);
+    expect(next).not.toContain("INICIO DEL HISTORIAL RECUPERADO");
+  });
+
+  it("does not trigger on mentions or tool output", async () => {
+    for (const latest of [
+      { role: "user", content: "Explain RESTORECONTEXT please" },
+      { role: "tool", tool_call_id: "x", content: "RESTORECONTEXT" },
+    ]) {
+      const prompt = await post(new SessionPool(), [
+        { role: "user", content: "Initial task" }, latest,
+      ]);
+      expect(prompt).not.toContain("INICIO DEL HISTORIAL RECUPERADO");
+    }
+  });
+
+  it("handles an empty history and multipart text commands", async () => {
+    const prompt = await post(new SessionPool(), [{
+      role: "user", content: [{ type: "text", text: "RESTORECONTEXT" }],
+    }]);
+    expect(prompt).toContain("No hay historial anterior disponible");
+  });
+});
+
 describe("synthetic proxy waiting indicator", () => {
   it("refreshes GPT-6 workflow preferences on first and continued tool turns only", async () => {
     const tools = [{
