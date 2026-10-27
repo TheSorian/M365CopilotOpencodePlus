@@ -321,6 +321,15 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   /araç\s+çağrısı\s+yapama/i,
   /(?:dosya|araç)\s+erişimi\s+(?:olan|etkin)(?:[^.\n]|\.(?=\S)){0,40}oturum/i,                      // "dosya erişimi etkin bir kodlama oturumunda yeniden çalıştırın"
   /kopyala(?:[^.\n]|\.(?=\S)){0,80}kayde[dt]/i,                                                   // "kopyalayıp ozet.md olarak kaydedebilirsin" — hands the write back (kaydet → kayded- before a vowel) (kaydet/kayded-: consonant softening)
+  // Spanish. Mid-conversation or turn-1 give-up when M365 answers in Spanish (e.g. "ya no tengo acceso a herramientas",
+  // "en este entorno no puedo ejecutar comandos", "por favor edita el archivo manualmente").
+  /no\s+(?:dispongo|tengo|cuento\s+con)(?:\s+ya)?\s+(?:de\s+)?(?:acceso|herramientas?|consola|terminal|permisos?|capacidad)/i,
+  /(?:en\s+este\s+entorno|en\s+esta\s+sesi[oó]n|en\s+esta\s+conversaci[oó]n)(?:[^.\n]|\.(?=\S)){0,80}(?:no\s+(?:dispongo|tengo|puedo|est[aá]n|es\s+posible)|sin\s+herramientas|desactivad[ao])/i,
+  /(?:mis\s+)?(?:herramientas?|consola|terminal)(?:[^.\n]|\.(?=\S)){0,40}(?:no\s+est[aá]n?\s+disponibles?|desactivadas?|no\s+tengo)/i,
+  /(?:no\s+puedo|no\s+me\s+es\s+posible|incapaz\s+de)\s+(?:directamente\s+)?(?:ejecutar|acceder|modificar|editar|crear|escribir|guardar|leer)\s+(?:a\s+|en\s+)?(?:los?\s+|las?\s+)?(?:archivos?|ficheros?|comandos?|c[oó]digo|sistema|terminal|scripts?)/i,
+  /(?:he\s+perdido|ya\s+no\s+tengo)\s+(?:el\s+)?acceso/i,
+  /(?:reinicia|inicia|abre)\s+(?:la\s+tarea|la\s+sesi[oó]n|la\s+conversaci[oó]n)?\s*en\s+una\s+sesi[oó]n\s+(?:con\s+herramientas|de\s+c[oó]digo|de\s+programaci[oó]n|adecuada)/i,
+  /por\s+favor\s+(?:pega|edita|crea|modifica|ejecuta|guarda)\s+(?:t[uú]\s+)?(?:el|los|las|manualmente|directamente)?\s*(?:c[oó]digo|archivo|archivos|fichero|ficheros|contenido|comando|comandos)/i,
 ];
 
 // M365 sometimes creates a real patch in its Teams-hosted remote artifact
