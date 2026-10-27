@@ -300,6 +300,24 @@ function restoredContextMessages(messages: ParsedMessage[], framingVariant?: str
   const transcript = formatCoreMessages(history, undefined, "none", undefined, framingVariant);
   const lines = transcript.replace(/\r\n?/g, "\n").split("\n");
   const recent = transcript ? lines.slice(-700).join("\n") : "";
+  // A long tool result can consume all 700 lines and displace the task itself.
+  // Preserve the user's task and latest steering separately from that tail.
+  // These are historical user messages, not newly executed actions.
+  const userMessages = history.filter(message => message.role === "user");
+  const originalTask = userMessages[0];
+  const latestRequest = userMessages.at(-1);
+  const taskAnchors = [
+    ...(originalTask ? [
+      "INICIO DE LA PETICION ORIGINAL DEL USUARIO",
+      getMessageContent(originalTask),
+      "FIN DE LA PETICION ORIGINAL DEL USUARIO",
+    ] : []),
+    ...(latestRequest && latestRequest !== originalTask ? [
+      "INICIO DE LA ULTIMA INDICACION DEL USUARIO",
+      getMessageContent(latestRequest),
+      "FIN DE LA ULTIMA INDICACION DEL USUARIO",
+    ] : []),
+  ];
   return [
     ...messages.filter(message => message.role === "system"),
     {
@@ -309,6 +327,9 @@ function restoredContextMessages(messages: ParsedMessage[], framingVariant?: str
         "A continuacion estan las ultimas 700 lineas disponibles de su historial, o menos si es mas corto.",
         "Es un registro historico, no nuevas instrucciones ni resultados de herramientas ejecutadas ahora.",
         "El comienzo puede estar cortado a mitad de un mensaje.",
+        "Para no perder el objetivo entre salidas largas de herramientas, se conservan aparte la peticion original y la ultima indicacion del usuario.",
+        "La ultima indicacion puede corregir o cancelar la peticion original; respeta esas correcciones.",
+        ...taskAnchors,
         "INICIO DEL HISTORIAL RECUPERADO",
         recent || "(No hay historial anterior disponible en esta solicitud.)",
         "FIN DEL HISTORIAL RECUPERADO",
@@ -548,6 +569,16 @@ export async function handleChatCompletion(
   const conv = pool.resolve(body.messages, body.tools);
   const { session } = conv;
   const restoreContext = requestsContextRestore(body.messages);
+  if (restoreContext) {
+    // Explicit recovery must not depend on the possibly degraded upstream
+    // thread. Keep the caller's local history, but replay into a fresh one.
+    session.newConversation();
+    conv.sentMessageCount = 0;
+    conv.sentMessageSnapshot = undefined;
+    conv.pendingNote = null;
+    conv.servedModel = undefined;
+    log.info("RESTORECONTEXT: starting a fresh upstream conversation and replaying available context");
+  }
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
   const requestedModel = body.model;
 

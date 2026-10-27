@@ -1657,7 +1657,7 @@ describe("RESTORECONTEXT", () => {
     expect(JSON.stringify(messages)).toBe(original);
   });
 
-  it("replays assistant tool calls and actual results on a continuation without rotating", async () => {
+  it("restores into a fresh upstream conversation and then continues that conversation normally", async () => {
     const pool = new SessionPool();
     const messages: any[] = [{ role: "user", content: "ORIGINAL_TASK_MARKER" }];
     await post(pool, messages);
@@ -1675,13 +1675,45 @@ describe("RESTORECONTEXT", () => {
     expect(prompt).toContain("pwd");
     expect(prompt).toContain("REAL_WORKSPACE_RESULT");
     expect(prompt).toContain("INICIO DEL HISTORIAL RECUPERADO");
-    expect(scripted.newConversations).toBe(rotations);
+    expect(scripted.newConversations).toBe(rotations + 1);
     messages.push(
       { role: "assistant", content: "Context received." },
       { role: "user", content: "Continue normally." },
     );
     const next = await post(pool, messages);
     expect(next).not.toContain("INICIO DEL HISTORIAL RECUPERADO");
+    expect(scripted.newConversations).toBe(rotations + 1);
+  });
+
+  it("preserves the task and latest steering when a long tool result fills the replay window", async () => {
+    const messages: any[] = [
+      { role: "system", content: "CURRENT_WORKSPACE_RULES" },
+      { role: "user", content: "ORIGINAL_TASK: repair context restoration, not the image viewer." },
+      { role: "assistant", content: "I will inspect the handler." },
+      { role: "user", content: "LATEST_STEERING: preserve existing changes and do not implement PDF selection." },
+      { role: "assistant", content: null, tool_calls: [{
+        id: "call-long-output", type: "function",
+        function: { name: "bash", arguments: '{"command":"cat handler.ts"}' },
+      }] },
+      { role: "tool", tool_call_id: "call-long-output",
+        content: Array.from({ length: 950 }, (_, i) => `TOOL_OUTPUT_${i}`).join("\n") },
+      { role: "assistant", content: "The output needs inspection." },
+      { role: "user", content: "RESTORECONTEXT" },
+    ];
+    const original = JSON.stringify(messages);
+    for (const stream of [false, true]) {
+      const prompt = await post(new SessionPool(), messages, stream);
+      const recovered = prompt.split("INICIO DEL HISTORIAL RECUPERADO\n")[1]
+        .split("\nFIN DEL HISTORIAL RECUPERADO")[0];
+      expect(recovered.split("\n")).toHaveLength(700);
+      expect(recovered).not.toContain("ORIGINAL_TASK:");
+      expect(recovered).not.toContain("LATEST_STEERING:");
+      expect(prompt).toContain("ORIGINAL_TASK: repair context restoration, not the image viewer.");
+      expect(prompt).toContain("LATEST_STEERING: preserve existing changes and do not implement PDF selection.");
+      expect(prompt).toContain("CURRENT_WORKSPACE_RULES");
+      expect(prompt).toContain("TOOL_OUTPUT_949");
+      expect(JSON.stringify(messages)).toBe(original);
+    }
   });
 
   it("does not trigger on mentions or tool output", async () => {

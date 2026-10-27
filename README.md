@@ -55,8 +55,16 @@ model to resume the pending task. User messages, assistant replies, tool calls
 and tool results are included; current system instructions and tool definitions
 are sent separately and are not counted toward the 700-line limit.
 
-The command does not normally start a new upstream conversation, execute old
-tool calls, or enable disk logging. It works with streaming and non-streaming
+The original user request and the latest user instruction are also preserved
+separately, outside that limit. Otherwise a long tool result can fill all 700
+lines and remove the very task the model is supposed to resume. The latest
+instruction may correct or cancel the original request. These anchors come
+only from messages still present in the current request; they cannot recover
+messages already removed by the client.
+
+The command starts a fresh upstream conversation and replays the available
+context into it, without deleting the client's local chat history. It does not
+execute old tool calls or enable disk logging. It works with streaming and non-streaming
 requests. Earlier occurrences of the command do not trigger another replay.
 If the client has already removed older messages, those messages cannot be
 recovered by this command. The first retained line may be mid-message, and
