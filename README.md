@@ -15,8 +15,6 @@ OpenCode installation:
 | File | Purpose |
 |---|---|
 | `m365-sol-prompt.mjs` | Persistent session instructions: image handling, `question`, `apply_patch`, and the `think` tool. Injected into every `m365` provider turn. |
-| `m365-workspace-images.mjs` | Adds the `m365_generate_image` tool: generates an image with M365 and saves the PNG into the workspace (the chat itself does not display images). |
-| `m365-image-workspace.mjs` | Helper used by the above plugin; locates the built `@m365-copilot/core` package and credentials directory. |
 
 **Registering them in OpenCode** — add the `file://` paths to the `plugin` array in your
 configuration (`~/.config/opencode/opencode.jsonc` or your project's `opencode.json`):
@@ -24,18 +22,13 @@ configuration (`~/.config/opencode/opencode.jsonc` or your project's `opencode.j
 ```jsonc
 {
   "plugin": [
-    "file:///path/to/m365-copilot-proxy/plugins/opencode/m365-sol-prompt.mjs",
-    "file:///path/to/m365-copilot-proxy/plugins/opencode/m365-workspace-images.mjs"
+    "file:///path/to/m365-copilot-proxy/plugins/opencode/m365-sol-prompt.mjs"
   ]
 }
 ```
 
 Notes:
 
-- The proxy must be built first (`pnpm build`) because the image plugin imports
-  `packages/core/dist/index.mjs`. If you copy the plugin outside this tree, point
-  `M365_CORE_PATH` at the built core and `M365_SETUP_DIR` at the credentials directory
-  containing `secrets.json`; otherwise it auto-discovers the supported layouts.
 - `instalar-m365.sh` still installs everything, but now **copies these files from the
   repository** instead of generating them. Reinstalling no longer overwrites customizations,
   and the repository remains the source of truth.
