@@ -5659,3 +5659,23 @@ bursty. Falsifier: fresh-conversation retries failing at the same rate as same-c
 Cost to watch: each such retry starts a conversation, which is what the F13 thread-rate throttle
 counts. Bounded to one per dropped turn, but on a bad `InternalError` day it adds up; the same
 afternoon's benching (one conversation per run) did trip `PerUserThrottled`.
+
+### F97 — the forcing retry was blind to Spanish give-ups too 🟡
+
+**Observed.** Live 2026-10-28, GPT-6.1 Sol: "Puedo ponerte comandos para seguir investigando, pero
+no puedo ejecutarlos yo desde aquí." The user's task had tools and the turn ran none, so this went
+back as an ordinary answer — the agent looked like a plain chat that hands the commands back.
+
+**Reading.** F80's lesson repeated: `looksLikeConfabulation` was English + Turkish. The model answers
+in the user's language, so a Spanish request produces Spanish give-ups ("no puedo ejecutarlos desde
+aquí", "no tengo acceso a los archivos", "pégame el contenido", "abre una terminal y ejecuta…") and
+none of the patterns matched. No forcing retry, no 502 — just the wrong answer.
+
+**Change.** Added first-person / session-scoped Spanish patterns, anchored on files, commands or the
+environment (so a Spanish summary of this repo doesn't match), with the same shape as the Turkish
+set. Enclitics ("ejecutarlos") are allowed by dropping the trailing word boundary on the verbs;
+`ver` keeps one so "verde"/"versión" don't match. Unit-tested with the live string plus positives and
+negative summaries; full unit suite green.
+
+**Open.** Not yet measured live (n=0 after the change). Falsifier: Spanish give-ups still reaching
+the user with no "forcing retry" line in the proxy log.

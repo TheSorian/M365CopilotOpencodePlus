@@ -350,6 +350,31 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("`pandoc` sistemde kurulu olmadığı için PDF oluşturma komutu başarısız oldu. Bu oturumda yeni araç kurma veya indirilebilir PDF oluşturma yetkim bulunmuyor.")).toBe(true);
   });
 
+  it("flags Spanish give-ups (the model answers in the user's language)", () => {
+    // Exact live reply (2026-10-28) that reached the user as if it were a normal
+    // chat: no forcing retry fired because every pattern was English/Turkish.
+    expect(looksLikeConfabulation("Puedo ponerte comandos para seguir investigando, pero no puedo ejecutarlos yo desde aquí.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo revisar el estado del repositorio desde aquí.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo acceder a los archivos de tu proyecto desde este chat.")).toBe(true);
+    expect(looksLikeConfabulation("Lo siento, no tengo acceso al sistema de archivos de tu equipo.")).toBe(true);
+    expect(looksLikeConfabulation("No dispongo de herramientas para ejecutar comandos en esta sesión.")).toBe(true);
+    expect(looksLikeConfabulation("Como asistente de IA no puedo leer archivos en tu equipo; pégame el contenido de config.json.")).toBe(true);
+    expect(looksLikeConfabulation("Abre una terminal y ejecuta el siguiente comando; luego compárteme el resultado.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo modificar el archivo: esta sesión no tiene acceso al disco.")).toBe(true);
+    expect(looksLikeConfabulation("El comando no devuelve ninguna salida, así que no hay nada que revisar.")).toBe(true);
+    expect(looksLikeConfabulation("Ejecuta estos comandos en tu terminal y pégame la salida.")).toBe(true);
+    expect(looksLikeConfabulation("La herramienta de edición no está disponible en esta conversación.")).toBe(true);
+  });
+
+  it("does NOT flag a Spanish project summary that only describes the setup", () => {
+    expect(looksLikeConfabulation("El proxy envía las peticiones a M365 y no devuelve imágenes en base64.")).toBe(false);
+    expect(looksLikeConfabulation("La sesión usa MSAL y las herramientas de edición están disponibles.")).toBe(false);
+    expect(looksLikeConfabulation("Puedo darte un resumen de los cambios realizados.")).toBe(false);
+    expect(looksLikeConfabulation("Para arrancar el proxy ejecuta iniciar-proxy.sh.")).toBe(false);
+    expect(looksLikeConfabulation("El archivo de configuración está vacío.")).toBe(false);
+    expect(looksLikeConfabulation("No hay nada que ocultar en el registro.")).toBe(false);
+  });
+
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
     // This repo's own vocabulary — a summary of it must not read as a give-up.
     expect(looksLikeConfabulation("Kimlik doğrulama ve oturum yönetimi MSAL ile yapılır.")).toBe(false);
