@@ -529,6 +529,32 @@ Two traps for anyone else doing this:
   `edit`/`write`. A name-based allowlist that covers only one of those leaves the model
   unable to edit files at all, with only the shell to fall back on.
 
+**Implemented in the proxy (2026-10-28).** `formatMessages` (`packages/core/src/tools.ts`)
+now does the trim itself, so nothing has to be configured in opencode:
+
+- Detection: a `system` message matching `running in OpenCode` or `# Code Mode`. pi and
+  other harnesses are untouched — the formatted request stays byte-identical.
+- System prompt: everything from `\n# Code Mode` through `</available_skills>` is
+  dropped, plus the trailing worktree hint that points at Code Mode's `execute`. The
+  harness rules, the user's `Instructions from: <path>` prose (AGENTS.md and global
+  rules) and the `<env>` block survive. On the captured opencode 2.2.0 turn this took
+  8,782 → 2,053 chars.
+- Tools: an allowlist keeps `shell, read, edit, write, grep, glob, webfetch, websearch`
+  and drops `execute` (Code Mode), `skill` (its inventory is gone), `subagent` and
+  `question`. The harness's own shell/write tool is kept even under another name
+  (`bash`, `run_command`, `apply_patch`, `create_file`). On the same turn the rendered
+  request went 16,731 → 6,685 chars (−60%) with 12 → 8 tools.
+- Knobs: `M365_OPENCODE_TRIM=0` disables it; `M365_OPENCODE_TOOLS=shell,read,…`
+  replaces the allowlist. Only the *rendered* request is trimmed — parsing and the
+  `tool_calls` returned to the client still use the original `body.tools`, so a fence
+  for a tool outside the list still maps back.
+
+Why it matters beyond prompt size: OpenCode's `# Code Mode` tells the model that tools
+"cannot be called directly" and must go through `execute`. That is false under this
+proxy's fenced emulation, and it is the one instruction a model trusts over the
+per-request framing — which is why weaker models answered "I can't run commands from
+here" while GPT-6/6.1 out-argued it. Removing the section removes the contradiction.
+
 ---
 
 ## 10. Tool calling & Copilot Studio agents

@@ -6,6 +6,55 @@ Use Microsoft 365 Copilot as an LLM backend for OpenAI-compatible coding agents 
 
 > **Want the gory protocol details?** See [docs/m365-copilot-api.md](docs/m365-copilot-api.md) — a full write-up of M365 Copilot's undocumented WebSocket API: auth, SignalR frames, tones/models, throttling, the "Disengaged" filter, and the Copilot Studio agent trick that makes tool calling work.
 
+## Plugins de OpenCode
+
+Los plugins que antes generaba solo el instalador viven ahora en el repositorio, en
+[`plugins/opencode/`](plugins/opencode/), y se pueden registrar a mano en cualquier
+instalación de OpenCode:
+
+| Archivo | Qué hace |
+|---|---|
+| `m365-sol-prompt.mjs` | Instrucciones persistentes (sesión): reglas de imágenes, `question`, `apply_patch`, la herramienta `think`. Se inyectan en cada turno del proveedor `m365`. |
+| `m365-workspace-images.mjs` | Añade la herramienta `m365_generate_image`: genera una imagen con M365 y guarda el PNG dentro del workspace (el chat no muestra imágenes). |
+| `m365-image-workspace.mjs` | Ayudante de la anterior; resuelve `@m365-copilot/core` ya construido y la carpeta de credenciales. |
+
+**Cómo registrarlos en OpenCode** — añade las rutas `file://` al array `plugin` de tu
+config (`~/.config/opencode/opencode.jsonc` o el `opencode.json` de tu proyecto):
+
+```jsonc
+{
+  "plugin": [
+    "file:///ruta/a/m365-copilot-proxy/plugins/opencode/m365-sol-prompt.mjs",
+    "file:///ruta/a/m365-copilot-proxy/plugins/opencode/m365-workspace-images.mjs"
+  ]
+}
+```
+
+Notas:
+
+- El proxy debe estar construido primero (`pnpm build`) porque el plugin de imágenes
+  importa `packages/core/dist/index.mjs`. Si lo copias fuera de este árbol, indica la
+  ruta con `M365_CORE_PATH` y las credenciales con `M365_SETUP_DIR` (la carpeta con
+  `secrets.json`); por defecto las busca él mismo en los dos layouts posibles.
+- `instalar-m365.sh` sigue instalando todo, pero ahora **copia estos archivos del
+  repositorio** en vez de generarlos: una reinstalación no pierde personalizaciones y
+  la fuente de verdad es el repo.
+
+### Adaptación a OpenCode (trims del proxy)
+
+OpenCode manda un `system prompt` grande que describe su "Code Mode" (herramientas que
+"solo se pueden llamar a través de `execute`"), un catálogo de herramientas anidadas y un
+inventario de skills. Esa sección contradice el formato de tool-calls del proxy y es la
+razón por la que los modelos débiles contestaban «no puedo ejecutar comandos» (GPT-6 y
+GPT-6.1 la ignoraban). El proxy la recorta él solo: cuando detecta un request de OpenCode
+marca `running in OpenCode` / `# Code Mode`, elimina esa sección y el inventario de
+skills, y ofrece solo las herramientas del núcleo (`shell, read, edit, write, grep, glob,
+webfetch, websearch`). En una petición capturada: prompt de sistema 8.782 → 2.053
+caracteres, request renderizado 16.731 → 6.685 (−60%). No hay nada que configurar
+(`M365_OPENCODE_TRIM=0` lo desactiva; `M365_OPENCODE_TOOLS=…` cambia la lista). Ver
+[docs/m365-copilot-api.md §9](docs/m365-copilot-api.md) y
+[hypotheses F98](docs/hypotheses.md).
+
 ## How it works
 
 M365 Copilot uses a SignalR WebSocket protocol, not the OpenAI API. This project translates between the two:

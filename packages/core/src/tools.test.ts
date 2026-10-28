@@ -704,3 +704,175 @@ describe("transcript style (which tags wrap the framing and harness system promp
     }
   });
 });
+
+describe("OpenCode harness adaptation", () => {
+  const openCodeSystem = `You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.
+
+# Harness
+- Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.
+
+# Code Mode
+
+Use the \`execute\` tool to call the tools listed below. They cannot be called directly.
+
+## Available tools
+
+- opencode (8 tools)
+  - tools.opencode.models({ query?: string }): Promise<{ total: number }>
+
+Skills provide specialized instructions and workflows for specific tasks.
+Use the skill tool to load a skill when a task matches its description.
+<available_skills>
+  <skill>
+    <id>opencode</id>
+    <description>Use this for anything about OpenCode.</description>
+  </skill>
+</available_skills>
+
+Instructions from: /project/AGENTS.md
+# AGENTS.md
+
+Responde en español y usa shell para todo.
+
+Today's date: Wed Oct 28 2026
+
+Here is some useful information about the environment you are running in:
+<env>
+  Working directory: /project
+  Platform: linux
+</env>
+When you create a worktree outside the current working directory, consider using \`execute\` to call \`tools.opencode.session_move\`.`;
+
+  const piSystem = "You are pi, a coding agent. Use your tools to do the work.";
+
+  const tool = (name: string, props: Record<string, unknown>, description = ""): ToolDef => ({
+    type: "function",
+    function: { name, description, parameters: { type: "object", properties: props, required: [] } },
+  });
+
+  const openCodeTools: ToolDef[] = [
+    tool("edit", { path: { type: "string" }, oldString: { type: "string" }, newString: { type: "string" } }),
+    tool("glob", { pattern: { type: "string" }, path: { type: "string" } }),
+    tool("grep", { pattern: { type: "string" }, path: { type: "string" } }),
+    tool("question", { questions: { type: "array" } }),
+    tool("read", { path: { type: "string" } }),
+    tool("shell", { command: { type: "string" } }, "Execute a shell command"),
+    tool("skill", { id: { type: "string" } }),
+    tool("write", { path: { type: "string" }, content: { type: "string" } }),
+    tool("execute", { code: { type: "string" } }, "Run JavaScript in a confined Code Mode runtime."),
+  ];
+
+  it("detects the OpenCode system prompt and leaves other harnesses alone", async () => {
+    const { isOpenCodeHarness } = await import("./tools.js");
+    expect(isOpenCodeHarness([{ role: "system", content: openCodeSystem }])).toBe(true);
+    expect(isOpenCodeHarness([{ role: "system", content: "# Code Mode\nUse execute." }])).toBe(true);
+    expect(isOpenCodeHarness([{ role: "system", content: piSystem }])).toBe(false);
+    expect(isOpenCodeHarness([{ role: "user", content: openCodeSystem }])).toBe(false);
+  });
+
+  it("drops Code Mode, the skills inventory and the false tool catalogue", async () => {
+    const { trimOpenCodeSystemPrompt } = await import("./tools.js");
+    const out = trimOpenCodeSystemPrompt(openCodeSystem);
+    expect(out).not.toContain("# Code Mode");
+    expect(out).not.toContain("execute");
+    expect(out).not.toContain("<available_skills>");
+    expect(out).not.toContain("Skills provide specialized instructions");
+    expect(out).not.toContain("opencode (8 tools)");
+    // What is true survives: the persona, the user's rules and the environment.
+    expect(out).toContain("running in OpenCode");
+    expect(out).toContain("Instructions from: /project/AGENTS.md");
+    expect(out).toContain("Responde en español y usa shell para todo.");
+    expect(out).toContain("<env>\n  Working directory: /project");
+    expect(out).not.toContain("When you create a worktree");
+    expect(out.length).toBeLessThan(openCodeSystem.length);
+  });
+
+  it("keeps the user's instructions when there is no skills block", async () => {
+    const { trimOpenCodeSystemPrompt } = await import("./tools.js");
+    const out = trimOpenCodeSystemPrompt(
+      "You are an AI agent running in OpenCode.\n\n# Code Mode\nUse execute.\n\nInstructions from: /p/AGENTS.md\nrule\n\n<env>\n  cwd: /p\n</env>",
+    );
+    expect(out).not.toContain("# Code Mode");
+    expect(out).toContain("Instructions from: /p/AGENTS.md\nrule");
+    expect(out).toContain("<env>");
+  });
+
+  it("trims the offered tools to the ones that can drive a coding loop", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    const names = trimOpenCodeTools(openCodeTools).map((t) => t.function.name);
+    for (const keep of ["shell", "read", "edit", "write", "grep", "glob"]) {
+      expect(names).toContain(keep);
+    }
+    for (const drop of ["execute", "skill", "question"]) {
+      expect(names).not.toContain(drop);
+    }
+  });
+
+  it("keeps the harness shell and write tool even when named differently", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    const bespoke = [
+      tool("run_command", { command: { type: "string" } }, "Run a command"),
+      tool("create_file", { file_path: { type: "string" }, content: { type: "string" } }),
+    ];
+    const names = trimOpenCodeTools(bespoke).map((t) => t.function.name);
+    expect(names).toContain("run_command");
+    expect(names).toContain("create_file");
+  });
+
+  it("renders a lean request for OpenCode and leaves pi byte-identical", async () => {
+    const { formatMessages } = await import("./tools.js");
+    const user = { role: "user", content: "lista los archivos" };
+
+    const oc = formatMessages(
+      [{ role: "system", content: openCodeSystem }, user],
+      openCodeTools,
+      undefined,
+      "cid",
+      "baseline",
+    );
+    expect(oc).not.toContain("# Code Mode");
+    expect(oc).not.toContain("<available_skills>");
+    expect(oc).not.toContain("Run JavaScript");
+    expect(oc).toContain("```shell");
+    expect(oc).toContain("Instructions from: /project/AGENTS.md");
+    expect(oc).toContain("<user>\nlista los archivos\n</user>");
+
+    const pi = formatMessages(
+      [{ role: "system", content: piSystem }, user],
+      openCodeTools,
+      undefined,
+      "cid",
+      "baseline",
+    );
+    expect(pi).toContain(piSystem);
+    expect(pi).toContain("Run JavaScript");
+  });
+
+  it("can be disabled with M365_OPENCODE_TRIM=0", async () => {
+    const { formatMessages } = await import("./tools.js");
+    process.env.M365_OPENCODE_TRIM = "0";
+    try {
+      const out = formatMessages(
+        [{ role: "system", content: openCodeSystem }, { role: "user", content: "hola" }],
+        openCodeTools,
+        undefined,
+        "cid",
+        "baseline",
+      );
+      expect(out).toContain("# Code Mode");
+      expect(out).toContain("Run JavaScript");
+    } finally {
+      delete process.env.M365_OPENCODE_TRIM;
+    }
+  });
+
+  it("honours M365_OPENCODE_TOOLS", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    process.env.M365_OPENCODE_TOOLS = "shell,read";
+    try {
+      expect(trimOpenCodeTools(openCodeTools).map((t) => t.function.name)).toEqual(["read", "shell", "write"]);
+    } finally {
+      delete process.env.M365_OPENCODE_TOOLS;
+    }
+  });
+});

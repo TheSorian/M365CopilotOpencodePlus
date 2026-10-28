@@ -5679,3 +5679,35 @@ negative summaries; full unit suite green.
 
 **Open.** Not yet measured live (n=0 after the change). Falsifier: Spanish give-ups still reaching
 the user with no "forcing retry" line in the proxy log.
+
+### F98 — opencode's Code Mode is the instruction weak models obey over the framing 🟡
+
+**Trigger.** Live report 2026-10-28: under opencode every model except GPT-6 and GPT-6.1
+answers "no puedo ejecutar comandos" / declines, on requests whose tools are real. Same
+proxy, same account, same task: GPT-6.1 tool-calls. Captured the real request (opencode
+v2.2.0, fake upstream at `/tmp/opencode/requests.jsonl`): 12 tools, and a system message
+whose `# Code Mode` section says tools "cannot be called directly" and must go through
+`execute`, followed by an `<available_skills>` inventory and a catalogue of nested
+`tools.opencode.*` functions.
+
+**Reading.** The proxy emulates tool calls with fences in the user turn. Code Mode is a
+stronger, system-level instruction saying the opposite ("call things through `execute`,
+not directly"). A model that follows the system prompt over the user-voice framing refuses
+in prose; GPT-6/6.1 out-argue it, which is exactly the split the user reported. The section
+is also dead weight: the nested tools are not reachable through the fenced format, and the
+skills inventory advertises a `skill` tool that the trim removes.
+
+**Change.** `formatMessages` now detects opencode (system message matches `running in
+OpenCode` / `# Code Mode`) and, for that request only, drops `# Code Mode` through
+`</available_skills>` (keeping `Instructions from:` and `<env>`), and renders an allowlist
+of tools (`shell, read, edit, write, grep, glob, webfetch, websearch`; `execute`, `skill`,
+`subagent`, `question` dropped). Captured turn: system 8,782 → 2,053 chars, rendered
+request 16,731 → 6,685 (−60%), 12 → 8 tools. Parsing still uses the original `body.tools`.
+`M365_OPENCODE_TRIM=0` disables; `M365_OPENCODE_TOOLS=…` replaces the allowlist. Unit
+tests cover detection, both trim shapes, the renamed-shell/write fallback, the opt-out and
+a byte-identical non-opencode request.
+
+**Open.** No live A/B yet (n=0): the account was 429 `PerUserThrottled` from the probes
+that produced the capture. Falsifier: with the trim in place, `claude-sonnet` /
+`gpt-5.5` still give up on a tool task in a fresh opencode session, with no Code Mode text
+in the request.

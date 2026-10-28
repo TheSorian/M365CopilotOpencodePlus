@@ -4,6 +4,8 @@ import {
   currentFramingVariant,
   deriveFencedSpec,
   findFirstToolFence,
+  findShellTool,
+  findWriteTool,
   formatFencedToolDefinitions,
   parseFencedToolCalls,
   renderFencedCall,
@@ -182,6 +184,82 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
   return [replyTool, ...tools];
 }
 
+// --- Harness adaptation -------------------------------------------------------
+
+/** OpenCode describes its own "Code Mode" in the system prompt: every tool is
+ *  reached through an `execute` tool, followed by a catalogue of nested tools and
+ *  an `<available_skills>` inventory. This proxy emulates tool calls with fences,
+ *  so that section is false here — and it is the instruction a model trusts over
+ *  the per-request framing. Weaker models obey it and answer "I can't run commands
+ *  from here" (the live complaint: every model except GPT-6/6.1); GPT-6 and 6.1
+ *  out-argue it. Drop the false section, the skills inventory and the `execute`
+ *  tool it advertises, and keep what is true: the harness rules, the user's
+ *  `Instructions from:` blocks (AGENTS.md and global rules) and the `<env>` block.
+ *  See docs/m365-copilot-api.md §9, "Trimming a heavy harness: opencode". */
+const OPENCODE_SYSTEM_MARKER = /running in OpenCode|# Code Mode/;
+/** Tools worth keeping for a coding loop. Everything else OpenCode offers
+ *  (`execute`, `skill`, `subagent`, `question`) either belongs to Code Mode (whose
+ *  prose is gone) or costs prompt weight without moving a coding task. Override
+ *  with `M365_OPENCODE_TOOLS=shell,read,...`. */
+const OPENCODE_DEFAULT_TOOLS = "shell,read,edit,write,grep,glob,webfetch,websearch";
+
+export function isOpenCodeHarness(messages: Message[]): boolean {
+  return messages.some(
+    (m) => m.role === "system" && OPENCODE_SYSTEM_MARKER.test(getMessageContent(m)),
+  );
+}
+
+/** Strip the parts of OpenCode's system prompt that this proxy cannot honour.
+ *  The user's own instructions and the environment survive verbatim. */
+export function trimOpenCodeSystemPrompt(text: string): string {
+  let out = text;
+  const codeMode = out.indexOf("\n# Code Mode");
+  if (codeMode >= 0) {
+    const tail = out.slice(codeMode);
+    const skillsEnd = tail.indexOf("</available_skills>");
+    // Without a skills block, stop at the first thing that is still true.
+    const stops = ["\nInstructions from:", "\nToday's date", "\n<env>"]
+      .map((s) => tail.indexOf(s))
+      .filter((i) => i >= 0);
+    const end = skillsEnd >= 0
+      ? skillsEnd + "</available_skills>".length
+      : stops.length > 0 ? Math.min(...stops) : tail.length;
+    out = out.slice(0, codeMode) + out.slice(codeMode + end);
+  } else {
+    // Older/newer prompts may ship only the skills inventory.
+    out = out.replace(
+      /\n?Skills provide specialized instructions[\s\S]*?<\/available_skills>/,
+      "",
+    );
+  }
+  // The trailing worktree hint points at `execute`/Code Mode, which is gone.
+  out = out.replace(/\n+When you create a worktree outside the current working directory[\s\S]*$/, "");
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Keep the fenced request lean: an allowlist of tools that can actually run a
+ *  coding loop, plus the harness's shell/write tool if the harness named them
+ *  differently. Parsing still uses the caller's original `tools`; only the
+ *  rendered request is trimmed, so a tool outside the list still maps back. */
+export function trimOpenCodeTools(tools: ToolDef[]): ToolDef[] {
+  const allow = new Set(
+    (process.env.M365_OPENCODE_TOOLS ?? OPENCODE_DEFAULT_TOOLS)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const kept = tools.filter((t) => allow.has(t.function.name));
+  const shell = findShellTool(tools);
+  if (shell && !kept.some((t) => t.function.name === shell.function.name)) {
+    kept.unshift(shell);
+  }
+  const write = findWriteTool(tools);
+  if (write && !kept.some((t) => t.function.name === write.function.name)) {
+    kept.push(write);
+  }
+  return kept.length > 0 ? kept : tools;
+}
+
 export function formatMessages(
   messages: Message[],
   tools?: ToolDef[],
@@ -191,11 +269,22 @@ export function formatMessages(
 ): string {
   const parts: string[] = [];
 
+  // Trim a heavy harness before it reaches M365. `M365_OPENCODE_TRIM=0` opts out.
+  const openCode = process.env.M365_OPENCODE_TRIM !== "0" && isOpenCodeHarness(messages);
+  const shapedMessages = openCode
+    ? messages.map((m) =>
+        m.role === "system"
+          ? { ...m, content: trimOpenCodeSystemPrompt(getMessageContent(m)) }
+          : m,
+      )
+    : messages;
+  const shapedTools = openCode && tools ? trimOpenCodeTools(tools) : tools;
+
   if (conversationId) {
     parts.push(`<conversation_id>${conversationId}</conversation_id>`);
   }
 
-  const effectiveTools = tools ? maybeInjectReplyTool(tools) : tools;
+  const effectiveTools = shapedTools ? maybeInjectReplyTool(shapedTools) : shapedTools;
   const specMap = effectiveTools ? buildSpecMap(effectiveTools) : null;
   // The wrapper tags follow the framing variant: most keep the historical
   // `<system>` tags, but Claude Sonnet reads a `<system>` block inside a user
@@ -207,7 +296,7 @@ export function formatMessages(
     parts.push(style.framingTag ? `<${style.framingTag}>\n${framing}\n</${style.framingTag}>` : framing);
   }
 
-  for (const m of messages) {
+  for (const m of shapedMessages) {
     if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
       const calls = m.tool_calls.map((tc) => {
         const rawArgs = tc.function.arguments;
@@ -235,7 +324,7 @@ export function formatMessages(
       const content = getMessageContent(m);
       parts.push(`<assistant>${content ? "\n" + content : ""}\n${calls}\n</assistant>`);
     } else if (m.role === "tool") {
-      parts.push(formatToolResponse(m, messages));
+      parts.push(formatToolResponse(m, shapedMessages));
     } else if (m.role === "system") {
       parts.push(`<${style.systemTag}>\n${getMessageContent(m)}\n</${style.systemTag}>`);
     } else {
