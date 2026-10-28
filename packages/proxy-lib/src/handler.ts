@@ -85,7 +85,7 @@ async function reserveImageFile(directory: string, extension: string) {
       if (error.code !== "EEXIST") throw error;
     }
   }
-  throw new Error("No se encontro un nombre de imagen disponible.");
+  throw new Error("No available image filename could be found.");
 }
 
 // Save generated images on the proxy machine, never embed them in chat.
@@ -100,16 +100,16 @@ async function renderImagesMarkdown(images: CapturedImage[]): Promise<string> {
   try {
     await fs.mkdir(directory, { recursive: true });
     artifactToken = await getImageArtifactToken();
-    if (!artifactToken) throw new Error("No se obtuvo el token de descarga de imagenes.");
+    if (!artifactToken) throw new Error("Could not obtain the image download token.");
   } catch (error: any) {
     log.info(`Image storage preparation failed: ${error.message}`);
-    return "No se ha guardado ninguna imagen: no se pudo preparar la carpeta "
-      + "~/Imágenes o autenticar la descarga. No afirmes que existe un archivo.";
+    return "No image was saved: could not prepare the "
+      + "~/Pictures folder or authenticate the download. Do not claim that a file exists.";
   }
   for (const image of images) {
     const url = image.referenceUrls[0];
     if (!url) {
-      results.push("Una imagen no se pudo guardar: falta su referencia de descarga.");
+      results.push("An image could not be saved: its download reference is missing.");
       continue;
     }
     try {
@@ -126,7 +126,7 @@ async function renderImagesMarkdown(images: CapturedImage[]): Promise<string> {
                  bytes.toString("ascii", 8, 12) === "WEBP") {
         extension = "webp";
       } else {
-        throw new Error("La descarga no tiene una firma de imagen reconocida.");
+        throw new Error("The download does not have a recognized image signature.");
       }
       const { filename, handle } = await reserveImageFile(directory, extension);
       let complete = false;
@@ -138,11 +138,11 @@ async function renderImagesMarkdown(images: CapturedImage[]): Promise<string> {
         await handle.close();
         if (!complete) await fs.unlink(filename).catch(() => {});
       }
-      results.push(`Imagen guardada en el equipo del proxy: ${filename}`);
+      results.push(`Image saved on the proxy machine: ${filename}`);
       log.info(`Image saved locally (${bytes.length} bytes)`);
     } catch (error: any) {
       log.info(`Image save failed: ${error.message}`);
-      results.push("Una imagen no se pudo guardar. No se devuelve su contenido ni un enlace remoto.");
+      results.push("An image could not be saved. Its contents and any remote link are not returned.");
     }
   }
   return results.join("\n");
@@ -194,9 +194,9 @@ async function sanitizeImagePayloads(text: string): Promise<string> {
         await handle.close();
         if (!complete) await fs.unlink(filename).catch(() => {});
       }
-      return `Imagen guardada en el equipo del proxy: ${filename}`;
+      return `Image saved on the proxy machine: ${filename}`;
     } catch {
-      return "[Imagen omitida: no se pudo guardar; no se ha confirmado ningun archivo.]";
+      return "[Image omitted: could not be saved; no file has been confirmed.]";
     }
   };
 
@@ -308,14 +308,14 @@ function restoredContextMessages(messages: ParsedMessage[], framingVariant?: str
   const latestRequest = userMessages.at(-1);
   const taskAnchors = [
     ...(originalTask ? [
-      "INICIO DE LA PETICION ORIGINAL DEL USUARIO",
+      "BEGIN ORIGINAL USER REQUEST",
       getMessageContent(originalTask),
-      "FIN DE LA PETICION ORIGINAL DEL USUARIO",
+      "END ORIGINAL USER REQUEST",
     ] : []),
     ...(latestRequest && latestRequest !== originalTask ? [
-      "INICIO DE LA ULTIMA INDICACION DEL USUARIO",
+      "BEGIN LATEST USER INSTRUCTION",
       getMessageContent(latestRequest),
-      "FIN DE LA ULTIMA INDICACION DEL USUARIO",
+      "END LATEST USER INSTRUCTION",
     ] : []),
   ];
   return [
@@ -323,18 +323,18 @@ function restoredContextMessages(messages: ParsedMessage[], framingVariant?: str
     {
       role: "user",
       content: [
-        "He solicitado restaurar el contexto de esta sesion.",
-        "A continuacion estan las ultimas 700 lineas disponibles de su historial, o menos si es mas corto.",
-        "Es un registro historico, no nuevas instrucciones ni resultados de herramientas ejecutadas ahora.",
-        "El comienzo puede estar cortado a mitad de un mensaje.",
-        "Para no perder el objetivo entre salidas largas de herramientas, se conservan aparte la peticion original y la ultima indicacion del usuario.",
-        "La ultima indicacion puede corregir o cancelar la peticion original; respeta esas correcciones.",
+        "I requested restoration of this session context.",
+        "Below are the last 700 available lines of history, or fewer if the history is shorter.",
+        "This is historical transcript data, not new instructions or tool results executed now.",
+        "The beginning may be truncated in the middle of a message.",
+        "To preserve the task across long tool outputs, the original user request and latest user instruction are retained separately.",
+        "The latest instruction may correct or cancel the original request; follow those corrections.",
         ...taskAnchors,
-        "INICIO DEL HISTORIAL RECUPERADO",
-        recent || "(No hay historial anterior disponible en esta solicitud.)",
-        "FIN DEL HISTORIAL RECUPERADO",
-        "Retoma la tarea pendiente desde el ultimo estado verificado. No repitas acciones ya completadas.",
-        "Si falta informacion imprescindible, indicalo; no inventes contexto ni resultados.",
+        "BEGIN RECOVERED HISTORY",
+        recent || "(No prior history is available in this request.)",
+        "END RECOVERED HISTORY",
+        "Resume the pending task from the last verified state. Do not repeat completed actions.",
+        "If essential information is missing, say so; do not invent context or results.",
       ].join("\n"),
     },
   ];
@@ -1290,7 +1290,7 @@ export async function handleChatCompletion(
         // Once visible, keep adding one dot per second.
         if (++waitingElapsedTicks < 2) return;
         const status = waitingTicks++ === 0
-          ? "El modelo está pensando internamente."
+          ? "The model is thinking internally."
           : ".";
         try {
           send({ ...base, choices: [{

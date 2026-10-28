@@ -163,7 +163,7 @@ describe("filtered streaming (non-tool path)", () => {
     expect(text).toContain("despues");
     expect(text).not.toContain("data:image");
     expect(text).not.toContain("AAAA");
-    expect(text).toContain("Imagen omitida");
+    expect(text).toContain("Image omitted");
   });
 
   it("emits the trailing remainder once when the final text outruns the delta stream", async () => {
@@ -1800,7 +1800,7 @@ describe("synthetic proxy waiting indicator", () => {
     scripted.result = null;
     scripted.deltas = toolTurn
       ? ["`", "``sh", "ell", "\n", "pwd", "\n```"]
-      : ["Respuesta real."];
+      : ["Real response."];
     scripted.fullText = scripted.deltas.join("");
     let release!: () => void;
     scripted.gate = new Promise<void>(resolve => { release = resolve; });
@@ -1848,10 +1848,10 @@ describe("synthetic proxy waiting indicator", () => {
         .map(c => c.choices?.[0]?.delta?.reasoning_content)
         .filter(status => status !== undefined);
       expect(statuses).toHaveLength(9);
-      expect(statuses[0]).toBe("El modelo est\u00e1 pensando internamente.");
+      expect(statuses[0]).toBe("The model is thinking internally.");
       expect(statuses.slice(1)).toEqual(Array(8).fill("."));
-      expect(reasoning).toBe("El modelo est\u00e1 pensando internamente" + ".".repeat(9));
-      expect(content).toBe("Respuesta real.");
+      expect(reasoning).toBe("The model is thinking internally" + ".".repeat(9));
+      expect(content).toBe("Real response.");
       expect(chunks.at(-1).choices[0].finish_reason).toBe("stop");
     });
   }
@@ -1898,7 +1898,7 @@ describe("synthetic proxy waiting indicator", () => {
     const statuses = chunks
       .map(c => c.choices?.[0]?.delta?.reasoning_content)
       .filter(status => status !== undefined);
-    expect(statuses).toEqual(["El modelo est\u00e1 pensando internamente."]);
+    expect(statuses).toEqual(["The model is thinking internally."]);
     expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
   });
 

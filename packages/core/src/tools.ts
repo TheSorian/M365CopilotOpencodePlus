@@ -196,7 +196,7 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
  *  tool it advertises, and keep what is true: the harness rules, the user's
  *  `Instructions from:` blocks (AGENTS.md and global rules) and the `<env>` block.
  *  See docs/m365-copilot-api.md §9, "Trimming a heavy harness: opencode". */
-const OPENCODE_SYSTEM_MARKER = /running in OpenCode|# Code Mode/;
+const OPENCODE_SYSTEM_MARKER = /running in OpenCode|# Code Mode|<available_skills>|Instructions from: .*AGENTS\.md|<env>|You are an AI agent running in OpenCode/i;
 /** Tools worth keeping for a coding loop. Everything else OpenCode offers
  *  (`execute`, `skill`, `subagent`, `question`) either belongs to Code Mode (whose
  *  prose is gone) or costs prompt weight without moving a coding task. Override
