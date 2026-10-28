@@ -7,12 +7,12 @@ const setup = path.dirname(fileURLToPath(import.meta.url));
 
 export async function generateToWorkspace(input, directory, signal, generate) {
   if (!input || typeof input.prompt !== "string" || !input.prompt.trim()) {
-    throw new Error("Falta una descripcion para generar la imagen.");
+    throw new Error("Missing image description.");
   }
   const workspace = await fs.realpath(directory);
   const relative = input.path || "generated-images/imagen.png";
   if (typeof relative !== "string" || path.isAbsolute(relative)) {
-    throw new Error("La ruta debe ser relativa al workspace.");
+    throw new Error("The path must be relative to the workspace.");
   }
   const target = path.resolve(workspace, relative);
   const inside = value => {
@@ -20,7 +20,7 @@ export async function generateToWorkspace(input, directory, signal, generate) {
     return rel !== "" && rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
   };
   if (!inside(target) || path.extname(target).toLowerCase() !== ".png") {
-    throw new Error("Usa una ruta .png dentro del workspace.");
+    throw new Error("Use a .png path inside the workspace.");
   }
   // Check every existing ancestor before creating directories: do not follow
   // a workspace symlink into another project or the user's home.
@@ -31,7 +31,7 @@ export async function generateToWorkspace(input, directory, signal, generate) {
     try {
       const stat = await fs.lstat(current);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        throw new Error("La carpeta de destino contiene un enlace o no es un directorio.");
+        throw new Error("The target folder contains a symlink or is not a directory.");
       }
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
@@ -56,7 +56,7 @@ export async function generateToWorkspace(input, directory, signal, generate) {
       const corePath = candidates.find((p) => existsSync(p));
       if (!corePath) {
         throw new Error(
-          "No se encontro packages/core/dist/index.mjs (construye el proxy o define M365_CORE_PATH).",
+          "packages/core/dist/index.mjs not found (build the proxy or set M365_CORE_PATH).",
         );
       }
       // The auth data (secrets.json, msal-cache.json…) sits in the setup home:
@@ -75,12 +75,12 @@ export async function generateToWorkspace(input, directory, signal, generate) {
       orientation: input.orientation || "square",
       signal,
     });
-    if (!images.length) throw new Error("El servicio no devolvio ninguna imagen.");
+    if (!images.length) throw new Error("The service returned no images.");
     const image = images[0];
     const bytes = Buffer.from(image.data);
     const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
     if (bytes.length < 24 || !bytes.subarray(0, 8).equals(png)) {
-      throw new Error("El servicio no devolvio un PNG valido; no se guarda con una extension incorrecta.");
+      throw new Error("The service did not return a valid PNG; refusing to save with an incorrect extension.");
     }
     await handle.writeFile(bytes);
     saved = true;

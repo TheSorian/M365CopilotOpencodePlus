@@ -7,21 +7,21 @@ export default {
       editor.add({
         name: "m365_generate_image",
         description: [
-          "Genera una imagen real con M365 y guarda el PNG en el workspace actual.",
-          "El usuario no puede subir ni ver imagenes en el chat: todo pasa por archivos del workspace.",
-          "No pidas adjuntos ni prometas mostrar imagenes aqui; devuelve la ruta para abrirla fuera del chat.",
-          "Solo crea imagenes desde texto; no admite referencias visuales ni edicion de imagenes existentes.",
-          "Usa esta herramienta para crear imagenes, en lugar de generar enlaces remotos en el chat.",
-          "Indica prompt, una ruta relativa .png y opcionalmente orientation.",
-          "No sobrescribe archivos existentes. Devuelve solo ruta, dimensiones y tamano:",
-          "nunca devuelve base64 ni URLs de imagen al historial.",
-          "Tras ejecutarla, informa de la ruta real devuelta. No inventes enlaces sandbox.",
+          "Generate a real image with M365 and save the PNG in the current workspace.",
+          "The user cannot upload or view images in chat: everything goes through workspace files.",
+          "Do not ask for attachments or promise to display images here; return the path so it can be opened outside the chat.",
+          "Only creates images from text; no visual references or image editing.",
+          "Use this tool to create images instead of generating remote links in chat.",
+          "Provide a prompt, a relative .png path, and optionally orientation.",
+          "Does not overwrite existing files. Returns only path, dimensions, and size:",
+          "Never returns base64 or image URLs to the conversation history.",
+          "After execution, report the real returned path. Do not invent sandbox links.",
         ].join(" "),
         input: {
           type: "object",
           properties: {
-            prompt: { type: "string", description: "Descripcion completa de la imagen." },
-            path: { type: "string", description: "Ruta relativa nueva, por ejemplo generated-images/paisaje.png." },
+            prompt: { type: "string", description: "Full image description." },
+            path: { type: "string", description: "New relative path, e.g. generated-images/landscape.png." },
             orientation: { type: "string", enum: ["square", "landscape", "portrait"] },
           },
           required: ["prompt", "path"],
@@ -33,7 +33,7 @@ export default {
           );
           return {
             content: JSON.stringify(result),
-            metadata: { title: "Imagen guardada: " + result.path },
+            metadata: { title: "Image saved: " + result.path },
           };
         },
       });

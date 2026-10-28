@@ -6,54 +6,54 @@ Use Microsoft 365 Copilot as an LLM backend for OpenAI-compatible coding agents 
 
 > **Want the gory protocol details?** See [docs/m365-copilot-api.md](docs/m365-copilot-api.md) — a full write-up of M365 Copilot's undocumented WebSocket API: auth, SignalR frames, tones/models, throttling, the "Disengaged" filter, and the Copilot Studio agent trick that makes tool calling work.
 
-## Plugins de OpenCode
+## OpenCode plugins
 
-Los plugins que antes generaba solo el instalador viven ahora en el repositorio, en
-[`plugins/opencode/`](plugins/opencode/), y se pueden registrar a mano en cualquier
-instalación de OpenCode:
+The plugins that were previously generated only by the installer now live in the repository under
+[`plugins/opencode/`](plugins/opencode/) and can be registered manually in any
+OpenCode installation:
 
-| Archivo | Qué hace |
+| File | Purpose |
 |---|---|
-| `m365-sol-prompt.mjs` | Instrucciones persistentes (sesión): reglas de imágenes, `question`, `apply_patch`, la herramienta `think`. Se inyectan en cada turno del proveedor `m365`. |
-| `m365-workspace-images.mjs` | Añade la herramienta `m365_generate_image`: genera una imagen con M365 y guarda el PNG dentro del workspace (el chat no muestra imágenes). |
-| `m365-image-workspace.mjs` | Ayudante de la anterior; resuelve `@m365-copilot/core` ya construido y la carpeta de credenciales. |
+| `m365-sol-prompt.mjs` | Persistent session instructions: image handling, `question`, `apply_patch`, and the `think` tool. Injected into every `m365` provider turn. |
+| `m365-workspace-images.mjs` | Adds the `m365_generate_image` tool: generates an image with M365 and saves the PNG into the workspace (the chat itself does not display images). |
+| `m365-image-workspace.mjs` | Helper used by the above plugin; locates the built `@m365-copilot/core` package and credentials directory. |
 
-**Cómo registrarlos en OpenCode** — añade las rutas `file://` al array `plugin` de tu
-config (`~/.config/opencode/opencode.jsonc` o el `opencode.json` de tu proyecto):
+**Registering them in OpenCode** — add the `file://` paths to the `plugin` array in your
+configuration (`~/.config/opencode/opencode.jsonc` or your project's `opencode.json`):
 
 ```jsonc
 {
   "plugin": [
-    "file:///ruta/a/m365-copilot-proxy/plugins/opencode/m365-sol-prompt.mjs",
-    "file:///ruta/a/m365-copilot-proxy/plugins/opencode/m365-workspace-images.mjs"
+    "file:///path/to/m365-copilot-proxy/plugins/opencode/m365-sol-prompt.mjs",
+    "file:///path/to/m365-copilot-proxy/plugins/opencode/m365-workspace-images.mjs"
   ]
 }
 ```
 
-Notas:
+Notes:
 
-- El proxy debe estar construido primero (`pnpm build`) porque el plugin de imágenes
-  importa `packages/core/dist/index.mjs`. Si lo copias fuera de este árbol, indica la
-  ruta con `M365_CORE_PATH` y las credenciales con `M365_SETUP_DIR` (la carpeta con
-  `secrets.json`); por defecto las busca él mismo en los dos layouts posibles.
-- `instalar-m365.sh` sigue instalando todo, pero ahora **copia estos archivos del
-  repositorio** en vez de generarlos: una reinstalación no pierde personalizaciones y
-  la fuente de verdad es el repo.
+- The proxy must be built first (`pnpm build`) because the image plugin imports
+  `packages/core/dist/index.mjs`. If you copy the plugin outside this tree, point
+  `M365_CORE_PATH` at the built core and `M365_SETUP_DIR` at the credentials directory
+  containing `secrets.json`; otherwise it auto-discovers the supported layouts.
+- `instalar-m365.sh` still installs everything, but now **copies these files from the
+  repository** instead of generating them. Reinstalling no longer overwrites customizations,
+  and the repository remains the source of truth.
 
-### Adaptación a OpenCode (trims del proxy)
+### OpenCode adaptation (proxy trimming)
 
-OpenCode manda un `system prompt` grande que describe su "Code Mode" (herramientas que
-"solo se pueden llamar a través de `execute`"), un catálogo de herramientas anidadas y un
-inventario de skills. Esa sección contradice el formato de tool-calls del proxy y es la
-razón por la que los modelos débiles contestaban «no puedo ejecutar comandos» (GPT-6 y
-GPT-6.1 la ignoraban). El proxy la recorta él solo: cuando detecta un request de OpenCode
-marca `running in OpenCode` / `# Code Mode`, elimina esa sección y el inventario de
-skills, y ofrece solo las herramientas del núcleo (`shell, read, edit, write, grep, glob,
-webfetch, websearch`). En una petición capturada: prompt de sistema 8.782 → 2.053
-caracteres, request renderizado 16.731 → 6.685 (−60%). No hay nada que configurar
-(`M365_OPENCODE_TRIM=0` lo desactiva; `M365_OPENCODE_TOOLS=…` cambia la lista). Ver
-[docs/m365-copilot-api.md §9](docs/m365-copilot-api.md) y
-[hypotheses F98](docs/hypotheses.md).
+OpenCode sends a large system prompt describing its Code Mode, nested tool catalog, and
+skills inventory. That section conflicts with the proxy's tool-calling format and was the
+reason weaker models sometimes answered with file-access or command-execution refusals.
+When the proxy detects an OpenCode request (`running in OpenCode` / `# Code Mode`), it
+automatically removes that section and the skills inventory, exposing only the core tools
+(`shell`, `read`, `edit`, `write`, `grep`, `glob`, `webfetch`, `websearch`).
+
+In a captured request, the system prompt shrank from 8,782 to 2,053 characters and the
+rendered request from 16,731 to 6,685 characters (about 60% smaller). No configuration is
+required. `M365_OPENCODE_TRIM=0` disables the trimming, and `M365_OPENCODE_TOOLS=...`
+overrides the exposed tool list. See [docs/m365-copilot-api.md §9](docs/m365-copilot-api.md)
+and [hypotheses F98](docs/hypotheses.md).
 
 ## How it works
 
