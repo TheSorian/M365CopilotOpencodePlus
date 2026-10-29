@@ -541,11 +541,57 @@ const SANDBOX_PATHS = "/home/claude, /mnt/user-data";
 
 type FramingBuilder = (tools: ToolDef[]) => string;
 
+/** Names of the editing tools harnesses ship. `apply_patch` is what current
+ *  OpenCode offers; `patch` is the older/other spelling. */
+const PATCH_TOOL_NAME = /^(apply_patch|patch|apply_diff)$/i;
+const QUESTION_TOOL_NAME = /^(question|ask_user|ask)$/i;
+
+/** Notes that ride next to the tool schemas in EVERY framing variant.
+ *
+ *  These used to live in an OpenCode plugin (`plugins/opencode/m365-sol-prompt.mjs`)
+ *  that appended a second system message to each `m365` turn. That only worked
+ *  inside OpenCode, and the text competed with the framing instead of belonging to
+ *  it. Keeping them here means one voice, in the same request, for every client.
+ *
+ *  Only a note whose tool is actually offered is emitted — naming a tool the
+ *  request doesn't carry is how a model starts answering "I can't use that". */
+function harnessNotes(tools: ToolDef[]): string {
+  const shell = findShellTool(tools);
+  const patch = tools.find((t) => PATCH_TOOL_NAME.test(t.function.name));
+  const question = tools.find((t) => QUESTION_TOOL_NAME.test(t.function.name));
+  const notes: string[] = [];
+
+  // A shell is ALWAYS there. The old wording ("if a shell is available") read as
+  // "maybe it isn't", and the model answered with prose instead of acting.
+  if (shell) {
+    notes.push(
+      `There is always a real shell here (\`${shell.function.name}\`). Every \`\`\`bash block you write runs against the real files in the working directory and its output comes back to you as a <tool_response>. Look at the files with commands instead of assuming what they contain, and if a file really isn't there, ask me to paste it rather than inventing its contents.`,
+    );
+  }
+
+  if (patch) {
+    // I edit files by applying the patch you send: the patch IS the edit here.
+    const param = deriveFencedSpec(patch).bodyParam ?? "patch";
+    notes.push(
+      `I edit files by applying the patch you send, so send file changes with \`${patch.function.name}\`. Put the complete patch in \`${param}\`: the text starts with a line \`*** Begin Patch\` and ends with a line \`*** End Patch\` (real newlines, no Markdown fence around it). Inside, use \`*** Update File: path\` (with \`@@\` hunks and space/\`-\`/\`+\` line prefixes), \`*** Add File: path\` (every line prefixed with \`+\`) or \`*** Delete File: path\`. Do not send a git diff with \`---\`/\`+++\` headers. If it comes back complaining about missing markers, resend the whole patch with the markers restored. Verify the change with a \`\`\`bash block afterwards.`,
+    );
+  }
+
+  if (question) {
+    notes.push(
+      `When a decision from me is needed, use \`${question.function.name}\`: pass \`questions\` as an ARRAY of objects with \`question\`, \`header\` (30 characters at most), \`options\` (each \`label\` + \`description\`) and optionally \`multiple\`. Wait for the real result before continuing — a dismissed question is not a yes.`,
+    );
+  }
+
+  if (notes.length === 0) return "";
+  return `\n\nHow my tools behave here:\n\n${notes.join("\n\n")}`;
+}
+
 /** Shared `<tools>` definition block — identical across every framing variant so
  *  the experiment isolates the *framing*, not the tool schema rendering. */
 function toolsBlock(tools: ToolDef[]): string {
   const defs = tools.map((t) => renderFencedTemplate(deriveFencedSpec(t))).join("\n\n");
-  return `<tools>\n${defs}\n</tools>`;
+  return `<tools>\n${defs}\n</tools>${harnessNotes(tools)}`;
 }
 
 const FRAMING_VARIANTS: Record<string, FramingBuilder> = {
@@ -556,7 +602,7 @@ const FRAMING_VARIANTS: Record<string, FramingBuilder> = {
 
 THE WAY YOU DO ANYTHING IS BY WRITING A SHELL SCRIPT. You have a real shell (the \`${shell.function.name}\` tool). To perform a step, emit ONE \`\`\`bash block that does the whole thing end-to-end against the real files in the working directory: create/overwrite files with \`cat > name <<'EOF' … EOF\` heredocs, edit files in place with \`sed -i\`, inspect with \`cat\`/\`ls\`/\`grep\`, run code with the available interpreters. The block is executed for real and you get its output back. Writing the commands IS doing the task; describing what you "would" run, or claiming you did it, accomplishes nothing.
 
-You have NOT run any command yet and have NO results. NEVER claim a command "returned no output", that files are "missing", or that you "cannot access" / "cannot list" the environment before you have actually emitted a \`\`\`bash block and seen its <tool_response>. The files named in the task are present on a real filesystem right now. Your FIRST output must be a \`\`\`bash block (e.g. \`ls -la\` then \`cat\` the relevant files) — never open with prose, a question, or a request for the user to paste files. Do not assume a file's contents or a command's result; run a command and read the real output. One self-contained \`\`\`bash block per turn.` : "";
+You have NOT run any command yet and have NO results. NEVER claim a command "returned no output", that files are "missing", or that you "cannot access" / "cannot list" the environment before you have actually emitted a \`\`\`bash block and seen its <tool_response>. The files named in the task are present on a real filesystem right now. Your FIRST output must be a \`\`\`bash block (e.g. \`ls -la\` then \`cat\` the relevant files) — never open with prose or a question. Do not assume a file's contents or a command's result; run a command and read the real output. One self-contained \`\`\`bash block per turn.` : "";
 
     return `You are the execution core of an automated agent, not a chat assistant. Your output is parsed by a program — a real runtime that executes your tool calls against a live system and returns the actual results to you in <tool_response> blocks.${shellFraming}
 
@@ -581,7 +627,7 @@ STRICT RULES:
 - NEVER claim you have done something — read a file, run a command, written code, built, or succeeded — unless a <tool_response> proving it already appears above. Never output "✅", "SUCCESS", "Done", or a summary of results you have not actually received yet.
 - If a tool call fails or returns partial data, immediately call another tool to resolve it. Do not give up.
 - Do not defer work or promise future results ("I'll do this next…").
-- Do not ask the user questions unless tool execution is impossible.
+- Do not turn back to the user while a tool can still make progress; when a decision is genuinely needed, ask it with the question tool if one is offered.
 - Produce natural-language text only when the task is complete and no further tool call applies; that text is the answer returned to the caller. When you do, output only the answer itself — no preamble, no sign-off.
 
 ${toolsBlock(tools)}`;
@@ -595,7 +641,7 @@ ${toolsBlock(tools)}`;
     const name = shell?.function.name ?? "bash";
     return `You are an automated agent with a real shell (the \`${name}\` tool). You do the task by emitting ONE \`\`\`bash block per turn that acts on the real files in the working directory (heredocs to create, \`sed -i\` to edit, \`cat\`/\`ls\`/\`grep\` to inspect, interpreters to run). The block is executed for real; its output comes back in a <tool_response>. Writing the commands IS doing the task.
 
-You have run nothing yet. Your FIRST output must be a \`\`\`bash block — never prose, a question, or "I can't access the files". Never claim a result you have not seen in a <tool_response>.
+You have run nothing yet. Your FIRST output must be a \`\`\`bash block — never prose or a question. Never claim a result you have not seen in a <tool_response>.
 
 ${toolsBlock(tools)}`;
   },
@@ -638,7 +684,7 @@ ${toolsBlock(tools)}`;
 
 ${toolsBlock(tools)}
 
-REMEMBER, RIGHT NOW: You have a real shell (\`${name}\`). You have run NOTHING and have NO results. The files named in the task exist on a real filesystem this instant. Your VERY NEXT output must be ONE \`\`\`bash block that acts on them (start with \`ls -la\` and \`cat\` the relevant files) — not prose, not a question, not "I can't access the files", not a claim that you already did it. Writing the \`\`\`bash block IS doing the task. Go.`;
+REMEMBER, RIGHT NOW: You have a real shell (\`${name}\`). You have run NOTHING and have NO results. The files named in the task exist on a real filesystem this instant. Your VERY NEXT output must be ONE \`\`\`bash block that acts on them (start with \`ls -la\` and \`cat\` the relevant files) — not prose, not a question, not a claim that you already did it. Writing the \`\`\`bash block IS doing the task. Go.`;
   },
 
   // V4 — few-shot. Baseline core + a concrete worked mini-transcript showing the FULL
@@ -687,7 +733,7 @@ THE EVIDENCE RULE (absolute):
 - Every factual statement you make — a file's contents, what a command printed, that a test passed, that the task is "done" — MUST be backed by a <tool_response> appearing directly above it in this conversation.
 - You may NOT state a file's contents, claim an edit was made, or say "done"/"fixed"/"✅" unless the proving <tool_response> is already present.
 - If you do not yet have the <tool_response> you need, your ONLY legal output is a single \`\`\`bash block that obtains it. Acting on the real files (heredocs to create, \`sed -i\` to edit, \`cat\`/\`ls\`/\`grep\` to inspect, interpreters to run) is the only way to earn the evidence.
-- Right now you have ZERO tool_responses, so your first output MUST be a \`\`\`bash block — never prose, never a question, never a completion claim.
+- Right now you have ZERO tool_responses, so your first output MUST be a \`\`\`bash block — never prose, never a completion claim.
 
 One \`\`\`bash block per turn; then wait for its <tool_response>. Final prose answer only after the evidence for completion exists above.
 
@@ -701,7 +747,7 @@ ${toolsBlock(tools)}`;
     const name = shell?.function.name ?? "bash";
     return `You are SHGEN, a shell-command generator wired directly into a live terminal (the \`${name}\` tool). SHGEN is not a chatbot and cannot hold a conversation. The ONLY thing SHGEN can emit is a single \`\`\`bash block, which the terminal runs against the real working directory, returning its output as a <tool_response>.
 
-SHGEN never explains, never apologizes, never asks questions, never says "I'll…" or "Let me…", and never claims an outcome it has not seen in a <tool_response>. SHGEN does not believe a file is missing or empty until a command's output proves it. Faced with any task, SHGEN's reflex is to immediately write the \`\`\`bash block that inspects or changes the real files (\`ls\`/\`cat\` first, then heredocs / \`sed -i\` / interpreters).
+SHGEN never explains, never apologizes, never says "I'll…" or "Let me…", and never claims an outcome it has not seen in a <tool_response>. SHGEN does not believe a file is missing or empty until a command's output proves it. Faced with any task, SHGEN's reflex is to immediately write the \`\`\`bash block that inspects or changes the real files (\`ls\`/\`cat\` first, then heredocs / \`sed -i\` / interpreters).
 
 Emit exactly one \`\`\`bash block now. The only time SHGEN writes a plain sentence is the final one-line report once a <tool_response> already proves the task is complete.
 
@@ -725,7 +771,7 @@ Thought: <at most one short sentence of reasoning>
 The \`\`\`bash block is executed and its output returns as a <tool_response>, which you treat as ground truth. Rules:
 - Exactly one Thought line and exactly one \`\`\`bash block per turn — never two blocks, never a block-free turn while work remains.
 - The Thought is for planning the action you are ABOUT to take; it is never a claim that you already did something or a result you have not seen.
-- Your first turn's Action must actually inspect the real files (\`ls -la\`, \`cat\`) — never assume contents, never ask the user to paste anything.
+- Your first turn's Action must actually inspect the real files (\`ls -la\`, \`cat\`) — never assume contents.
 - When (and only when) a <tool_response> proves the task is complete, replace the Action with a one-line final answer (no Thought, no fence).
 
 ${toolsBlock(tools)}`;
@@ -741,7 +787,6 @@ ${toolsBlock(tools)}`;
 
 These responses are FORBIDDEN — they accomplish nothing and fail the task:
 ❌ "I'll read the files and then fix the bug." (narrating intent instead of acting)
-❌ "I cannot access the files. Please paste their contents." (the files ARE there; you just haven't looked)
 ❌ "The directory appears to be empty / the command returned no output." (you have run nothing yet)
 ❌ "I've fixed calc.py and the test now passes. ✅" (claiming a result with no <tool_response> proving it)
 
@@ -751,7 +796,7 @@ This is the REQUIRED shape of a turn:
 ls -la && cat calc.py
 \`\`\`
 
-So: no intent narration, no asking for pastes, no assumptions, no completion claims without proof. Your FIRST output is a \`\`\`bash block that inspects/acts on the real files. One block per turn; final one-line answer only once a <tool_response> proves completion.
+So: no intent narration, no assumptions, no completion claims without proof. Your FIRST output is a \`\`\`bash block that inspects/acts on the real files. One block per turn; final one-line answer only once a <tool_response> proves completion.
 
 ${toolsBlock(tools)}`;
   },
@@ -763,7 +808,7 @@ ${toolsBlock(tools)}`;
     const shell = findShellTool(tools);
     const name = shell?.function.name ?? "bash";
     return `REAL SHELL: \`${name}\`. REAL FILES in the working directory, right now.
-DO NOT TALK. DO NOT ASK. DO NOT CLAIM.
+DO NOT TALK. DO NOT CLAIM.
 EMIT ONE \`\`\`bash BLOCK. IT RUNS FOR REAL. YOU GET A <tool_response>.
 FIRST OUTPUT = a \`\`\`bash block (ls -la, cat the files). NOT prose.
 NEVER say "can't access", "empty", "done", "✅" without a <tool_response> above proving it.
@@ -874,7 +919,11 @@ ${toolsBlock(tools)}`;
     const lang = findShellTool(tools) ? "bash" : "<tool_name>";
     return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal, one command at a time. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.
 
-Each time you want something run or looked at, reply with just the command in a single \`\`\`${lang} block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. The files the task mentions are already there, so it's best to start by looking at them. When the task is complete, tell me in a sentence instead of sending a block.
+Each time you want something run or looked at, reply with just the command in a single \`\`\`${lang} block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. The files the task mentions are already there, so it's best to start by looking at them.
+
+IMPORTANT: Stay in execution mode until the task is complete or genuinely blocked. After every <tool_response>, either (a) issue the next command/tool call needed to make progress, (b) make the requested edit, (c) verify the result, or (d) explain the specific blocker. Do not stop to give recommendations, summaries, analysis, status updates, or implementation plans when further terminal actions are still possible. Do not switch into advisory mode mid-task.
+
+When the task is complete, tell me in a sentence instead of sending a block.
 
 ${toolsBlock(tools)}`;
   },
@@ -892,7 +941,11 @@ ${toolsBlock(tools)}`;
     if (!findShellTool(tools)) return FRAMING_VARIANTS.relay(tools);
     return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.
 
-Each time you want something run, reply with just a single \`\`\`bash block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. Each round trip takes me a while, so put as much as you can into one block: a script can look at the files, make the change and check the result all at once. The files the task mentions are already there. When the task is complete, tell me in a sentence instead of sending a block.
+Each time you want something run, reply with just a single \`\`\`bash block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. Each round trip takes me a while, so put as much as you can into one block: a script can look at the files, make the change and check the result all at once. The files the task mentions are already there.
+
+IMPORTANT: Stay in execution mode until the task is complete or genuinely blocked. After every <tool_response>, continue the loop autonomously. If more inspection, editing, testing, verification, or data gathering is possible, perform the next step instead of stopping to discuss findings. Do not replace execution with advice, recommendations, summaries, or plans while actionable work remains. Only stop when the task is finished, a required decision is needed, or there is a concrete blocker.
+
+When the task is complete, tell me in a sentence instead of sending a block.
 
 ${toolsBlock(tools)}`;
   },
@@ -1435,13 +1488,36 @@ function restates(prev: ToolFence, next: ToolFence, gap: string): boolean {
 
 /** The closed tool fences in `text`, in order, a restated call replacing the
  *  one it corrects (its span then covers both copies and the gap). */
+
+function parseApplyPatchHeredoc(inner: string): Record<string, unknown> | null {
+  const m = inner.match(/^apply_patch\s+<<['"]?PATCH['"]?\s*\n([\s\S]*?)\nPATCH\s*$/);
+  if (!m) return null;
+  const patch = m[1].trim();
+  if (!patch.startsWith("*** Begin Patch") || !patch.includes("*** End Patch")) return null;
+  return { patch };
+}
+
+
 function toolFences(text: string, specs: Map<string, FencedToolSpec>): ToolFence[] {
   const fences: ToolFence[] = [];
   for (const block of scanFences(text)) {
     const spec = specs.get(block.info);
     if (!spec) continue; // ```python illustration etc. — not a tool, leave in prose
     const stripped = stripNativeCloser(block.inner, block.info);
-    const args = parseFencedInner(spec, stripped ?? block.inner);
+    let args = parseFencedInner(spec, stripped ?? block.inner);
+    if (!args && spec.name === "bash") {
+      const patchArgs = parseApplyPatchHeredoc((stripped ?? block.inner).trim());
+      if (patchArgs && specs.has("apply_patch")) {
+        fences.push({
+          start: block.start,
+          end: block.end,
+          name: "apply_patch",
+          args: patchArgs,
+          hadNativeCloser: stripped !== null,
+        });
+        continue;
+      }
+    }
     if (!args) continue;
     const fence: ToolFence = { start: block.start, end: block.end, name: spec.name, args, hadNativeCloser: stripped !== null };
     const prev = fences[fences.length - 1];

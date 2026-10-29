@@ -598,6 +598,60 @@ describe("formatFencedToolDefinitions", () => {
   });
 });
 
+describe("harness notes (integrated, no OpenCode plugin)", () => {
+  const applyPatch: ToolDef = {
+    type: "function",
+    function: {
+      name: "apply_patch",
+      description: "Apply a patch.",
+      parameters: { type: "object", properties: { patchText: { type: "string" } }, required: ["patchText"] },
+    },
+  };
+  const question: ToolDef = {
+    type: "function",
+    function: {
+      name: "question",
+      description: "Ask the user.",
+      parameters: { type: "object", properties: { questions: { type: "array" } }, required: ["questions"] },
+    },
+  };
+
+  it("says a shell is always there — no 'if available' hedge", () => {
+    const out = formatFencedToolDefinitions([bash, readFile], "baseline");
+    expect(out).toContain("There is always a real shell here (`bash`)");
+    expect(out).not.toContain("if a shell is available");
+  });
+
+  it("teaches the patchText markers when the harness offers apply_patch", () => {
+    const out = formatFencedToolDefinitions([bash, applyPatch], "relay_batch");
+    expect(out).toContain("`apply_patch`");
+    expect(out).toContain("`patchText`");
+    expect(out).toContain("*** Begin Patch");
+    expect(out).toContain("*** End Patch");
+    expect(out).toContain("*** Update File:");
+  });
+
+  it("teaches the question array shape when the harness offers question", () => {
+    const out = formatFencedToolDefinitions([bash, question], "relay_batch");
+    expect(out).toContain("`question`");
+    expect(out).toContain("`questions` as an ARRAY");
+  });
+
+  it("never names a tool the request doesn't carry", () => {
+    const out = formatFencedToolDefinitions([readFile], "baseline");
+    expect(out).not.toContain("always a real shell");
+    expect(out).not.toContain("*** Begin Patch");
+    expect(out).not.toContain("`questions` as an ARRAY");
+  });
+
+  it("no longer forbids asking me to paste a file", () => {
+    for (const v of ["baseline", "minimal", "relay", "relay_batch", "negative", "terse"]) {
+      const out = formatFencedToolDefinitions([bash, readFile], v);
+      expect(out).not.toMatch(/paste (?:the )?(?:contents|files|anything)/i);
+    }
+  });
+});
+
 describe("defaultFramingForTone", () => {
   it("gives both Opus models relay_batch — no jailbreak trips, and fewest turns (§24 F56, F60)", () => {
     // minimal 12/30 and baseline 8/30 tasks Disengaged, the user-voice relays 0.

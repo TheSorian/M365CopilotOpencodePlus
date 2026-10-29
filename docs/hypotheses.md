@@ -5698,14 +5698,24 @@ is also dead weight: the nested tools are not reachable through the fenced forma
 skills inventory advertises a `skill` tool that the trim removes.
 
 **Change.** `formatMessages` now detects opencode (system message matches `running in
-OpenCode` / `# Code Mode`) and, for that request only, drops `# Code Mode` through
-`</available_skills>` (keeping `Instructions from:` and `<env>`), and renders an allowlist
-of tools (`shell, read, edit, write, grep, glob, webfetch, websearch`; `execute`, `skill`,
-`subagent`, `question` dropped). Captured turn: system 8,782 → 2,053 chars, rendered
+OpenCode` / `# Code Mode`) and, for that request only, keeps **only the user's own text** —
+the `Instructions from:` blocks (AGENTS.md/CLAUDE.md/global rules) and `<env>` — dropping
+the persona, the `# Harness` rules, `# Code Mode` through `</available_skills>`, the tool
+catalogue and the response-formatting notes. It renders an allowlist of tools
+(`shell, read, edit, write, grep, glob, webfetch, websearch, question, patch, apply_patch`;
+`execute`, `skill`, `subagent` dropped). Captured turn: system 8,782 → ~155 chars, rendered
 request 16,731 → 6,685 (−60%), 12 → 8 tools. Parsing still uses the original `body.tools`.
 `M365_OPENCODE_TRIM=0` disables; `M365_OPENCODE_TOOLS=…` replaces the allowlist. Unit
 tests cover detection, both trim shapes, the renamed-shell/write fallback, the opt-out and
 a byte-identical non-opencode request.
+
+**Follow-up (2026-10-29).** The `apply_patch` / `question` instructions that shipped as an
+opencode plugin (`plugins/opencode/m365-sol-prompt.mjs`) are now rendered by the proxy
+itself (`harnessNotes()` in `fenced.ts`), next to the tool schemas in every framing variant,
+and only when that tool is offered. The plugin directory is gone, so there is nothing to
+register in opencode and no second system message competing with the framing. The notes also
+state that a shell is **always** there (the "if a shell is available" wording read as "maybe
+it isn't"), and the framings no longer forbid asking the user to paste a file.
 
 **Open.** No live A/B yet (n=0): the account was 429 `PerUserThrottled` from the probes
 that produced the capture. Falsifier: with the trim in place, `claude-sonnet` /

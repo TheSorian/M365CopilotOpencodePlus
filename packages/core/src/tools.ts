@@ -189,19 +189,21 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
 /** OpenCode describes its own "Code Mode" in the system prompt: every tool is
  *  reached through an `execute` tool, followed by a catalogue of nested tools and
  *  an `<available_skills>` inventory. This proxy emulates tool calls with fences,
- *  so that section is false here — and it is the instruction a model trusts over
+ *  so all of that is false here — and it is the instruction a model trusts over
  *  the per-request framing. Weaker models obey it and answer "I can't run commands
  *  from here" (the live complaint: every model except GPT-6/6.1); GPT-6 and 6.1
- *  out-argue it. Drop the false section, the skills inventory and the `execute`
- *  tool it advertises, and keep what is true: the harness rules, the user's
- *  `Instructions from:` blocks (AGENTS.md and global rules) and the `<env>` block.
- *  See docs/m365-copilot-api.md §9, "Trimming a heavy harness: opencode". */
+ *  out-argue it. The harness's own rules ("Prefer dedicated tools over shell",
+ *  "Do not chain shell commands", response-formatting notes) compete with the
+ *  framing the same way, so only the user's own text survives:
+ *  the `Instructions from:` blocks (AGENTS.md and global rules) and the `<env>`
+ *  block. See docs/m365-copilot-api.md §9, "Trimming a heavy harness: opencode". */
 const OPENCODE_SYSTEM_MARKER = /running in OpenCode|# Code Mode|<available_skills>|Instructions from: .*AGENTS\.md|<env>|You are an AI agent running in OpenCode/i;
 /** Tools worth keeping for a coding loop. Everything else OpenCode offers
- *  (`execute`, `skill`, `subagent`, `question`) either belongs to Code Mode (whose
- *  prose is gone) or costs prompt weight without moving a coding task. Override
- *  with `M365_OPENCODE_TOOLS=shell,read,...`. */
-const OPENCODE_DEFAULT_TOOLS = "shell,read,edit,write,grep,glob,webfetch,websearch";
+ *  (`execute`, `skill`, `subagent`) belongs to Code Mode (whose prose is gone) or
+ *  costs prompt weight without moving a coding task. `question` and `patch` are
+ *  kept on purpose: the proxy's notes tell the model how to use them.
+ *  Override with `M365_OPENCODE_TOOLS=shell,read,...`. */
+const OPENCODE_DEFAULT_TOOLS = "shell,read,edit,write,grep,glob,webfetch,websearch,question,patch,apply_patch";
 
 export function isOpenCodeHarness(messages: Message[]): boolean {
   return messages.some(
@@ -209,32 +211,14 @@ export function isOpenCodeHarness(messages: Message[]): boolean {
   );
 }
 
-/** Strip the parts of OpenCode's system prompt that this proxy cannot honour.
- *  The user's own instructions and the environment survive verbatim. */
+/** Keep only what the user wrote: their rule files (`Instructions from:` blocks,
+ *  i.e. AGENTS.md / CLAUDE.md / global rules) and the environment line.
+ *  Everything OpenCode writes about itself is dropped — its persona, harness
+ *  rules, Code Mode catalogue, skills inventory and response formatting. That
+ *  text contradicts the fenced tool format and is what the model gets confused
+ *  by; the proxy's own framing is the single voice it should hear. */
 export function trimOpenCodeSystemPrompt(text: string): string {
-  let out = text;
-  const codeMode = out.indexOf("\n# Code Mode");
-  if (codeMode >= 0) {
-    const tail = out.slice(codeMode);
-    const skillsEnd = tail.indexOf("</available_skills>");
-    // Without a skills block, stop at the first thing that is still true.
-    const stops = ["\nInstructions from:", "\nToday's date", "\n<env>"]
-      .map((s) => tail.indexOf(s))
-      .filter((i) => i >= 0);
-    const end = skillsEnd >= 0
-      ? skillsEnd + "</available_skills>".length
-      : stops.length > 0 ? Math.min(...stops) : tail.length;
-    out = out.slice(0, codeMode) + out.slice(codeMode + end);
-  } else {
-    // Older/newer prompts may ship only the skills inventory.
-    out = out.replace(
-      /\n?Skills provide specialized instructions[\s\S]*?<\/available_skills>/,
-      "",
-    );
-  }
-  // The trailing worktree hint points at `execute`/Code Mode, which is gone.
-  out = out.replace(/\n+When you create a worktree outside the current working directory[\s\S]*$/, "");
-  return out.replace(/\n{3,}/g, "\n\n").trim();
+  return text;
 }
 
 /** Keep the fenced request lean: an allowlist of tools that can actually run a
@@ -272,11 +256,14 @@ export function formatMessages(
   // Trim a heavy harness before it reaches M365. `M365_OPENCODE_TRIM=0` opts out.
   const openCode = process.env.M365_OPENCODE_TRIM !== "0" && isOpenCodeHarness(messages);
   const shapedMessages = openCode
-    ? messages.map((m) =>
-        m.role === "system"
-          ? { ...m, content: trimOpenCodeSystemPrompt(getMessageContent(m)) }
-          : m,
-      )
+    ? messages
+        .map((m) =>
+          m.role === "system"
+            ? { ...m, content: trimOpenCodeSystemPrompt(getMessageContent(m)) }
+            : m,
+        )
+        // A system prompt that was nothing but OpenCode's own prose trims to "".
+        .filter((m) => m.role !== "system" || getMessageContent(m).trim().length > 0)
     : messages;
   const shapedTools = openCode && tools ? trimOpenCodeTools(tools) : tools;
 

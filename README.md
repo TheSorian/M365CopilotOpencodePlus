@@ -6,47 +6,27 @@ Use Microsoft 365 Copilot as an LLM backend for OpenAI-compatible coding agents 
 
 > **Want the gory protocol details?** See [docs/m365-copilot-api.md](docs/m365-copilot-api.md) — a full write-up of M365 Copilot's undocumented WebSocket API: auth, SignalR frames, tones/models, throttling, the "Disengaged" filter, and the Copilot Studio agent trick that makes tool calling work.
 
-## OpenCode plugins
+## OpenCode behaviour (built into the proxy)
 
-The plugins that were previously generated only by the installer now live in the repository under
-[`plugins/opencode/`](plugins/opencode/) and can be registered manually in any
-OpenCode installation:
+There are no OpenCode plugins to register. The instructions that used to ship as
+`plugins/opencode/m365-sol-prompt.mjs` (shell usage, `apply_patch`, `question`) are now part
+of the per-request prompt the proxy renders, next to the tool schemas, so every client gets
+them the same way and nothing competes with the framing:
 
-| File | Purpose |
-|---|---|
-| `m365-sol-prompt.mjs` | Persistent session instructions: image handling, `question`, `apply_patch`, and the `think` tool. Injected into every `m365` provider turn. |
+- **A shell is always there.** The prompt states that a ```` ```bash ```` block is executed
+  against the real working directory and its output returns as a `<tool_response>` — no
+  "if a shell is available" hedge, which the model read as "maybe it isn't".
+- **Patch edits.** When the request offers `apply_patch` / `patch`, the prompt says the user
+  applies the patch it sends: `*** Begin Patch` … `*** End Patch`, `*** Update File:` /
+  `*** Add File:` / `*** Delete File:` sections, and no `---`/`+++` git-diff headers.
+- **Questions.** When the request offers `question`, the prompt gives the `questions` array
+  shape and says to wait for the real result.
+- **Asking for a file is allowed.** The old "never ask the user to paste files" rule was
+  removed from the framings: the model may ask for content it cannot read instead of
+  inventing it.
 
-**Registering them in OpenCode** — add the `file://` paths to the `plugin` array in your
-configuration (`~/.config/opencode/opencode.jsonc` or your project's `opencode.json`):
-
-```jsonc
-{
-  "plugin": [
-    "file:///path/to/m365-copilot-proxy/plugins/opencode/m365-sol-prompt.mjs"
-  ]
-}
-```
-
-Notes:
-
-- `instalar-m365.sh` still installs everything, but now **copies these files from the
-  repository** instead of generating them. Reinstalling no longer overwrites customizations,
-  and the repository remains the source of truth.
-
-### OpenCode adaptation (proxy trimming)
-
-OpenCode sends a large system prompt describing its Code Mode, nested tool catalog, and
-skills inventory. That section conflicts with the proxy's tool-calling format and was the
-reason weaker models sometimes answered with file-access or command-execution refusals.
-When the proxy detects an OpenCode request (`running in OpenCode` / `# Code Mode`), it
-automatically removes that section and the skills inventory, exposing only the core tools
-(`shell`, `read`, `edit`, `write`, `grep`, `glob`, `webfetch`, `websearch`).
-
-In a captured request, the system prompt shrank from 8,782 to 2,053 characters and the
-rendered request from 16,731 to 6,685 characters (about 60% smaller). No configuration is
-required. `M365_OPENCODE_TRIM=0` disables the trimming, and `M365_OPENCODE_TOOLS=...`
-overrides the exposed tool list. See [docs/m365-copilot-api.md §9](docs/m365-copilot-api.md)
-and [hypotheses F98](docs/hypotheses.md).
+Notes only appear when the matching tool is actually offered, so the model is never told
+about a tool it cannot use.
 
 ## How it works
 
@@ -144,8 +124,8 @@ recovered by this command. The first retained line may be mid-message, and
 ### 1. Install
 
 ```sh
-git clone https://github.com/cramt/m365-copilot-proxy
-cd m365-copilot-proxy
+git clone https://github.com/Bertogim/m365-copilot-proxy-opencode
+cd m365-copilot-proxy-opencode
 pnpm install
 pnpm build
 ```
@@ -225,7 +205,7 @@ Contributed by [@EatonWu](https://github.com/EatonWu). Two honest caveats:
 - The redirect capture and token exchange are the same ones the automated path uses in
   production, but **nobody has yet run this end to end against a federated Okta/Ping/Duo
   tenant.** If that's you, please report in
-  [#4](https://github.com/cramt/m365-copilot-proxy/issues/4) — working or not.
+  [#4](https://github.com/Bertogim/m365-copilot-proxy-opencode/issues/4) — working or not.
 
 > **Not device code.** The obvious headless alternative — `login.microsoft.com/device`
 > with a short code — is permanently dead here, not merely unimplemented. Initiation
@@ -333,7 +313,7 @@ module:
 ```nix
 # flake.nix
 {
-  inputs.m365.url = "github:cramt/m365-copilot-proxy";
+  inputs.m365.url = "github:Bertogim/m365-copilot-proxy-opencode";
 
   outputs = { nixpkgs, m365, ... }: {
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
@@ -359,7 +339,7 @@ module:
 The service runs as a hardened `DynamicUser` unit. Auth state (`msal-cache.json`,
 `agent-id.json`) persists in `/var/lib/m365-copilot-proxy`; a fresh deploy self-bootstraps
 via headless login using `secretsFile` + the bundled Chromium. To run the package directly
-without NixOS: `nix run github:cramt/m365-copilot-proxy -- 4141`.
+without NixOS: `nix run github:Bertogim/m365-copilot-proxy-opencode -- 4141`.
 
 ## Available models
 
@@ -560,7 +540,7 @@ safety margin. Requests without tools go without it. Until October 2026 this rou
 **`claude-opus` is metered separately: 40 turns a day, 75 a week.** Opus 5.5 draws on a "priority
 access" budget distinct from the ~600-message conversation cap, and **every M365 turn costs one,
 whatever its size**. In an agent loop every tool call is a turn, so one coding task costs 3–5 and a
-day's budget is gone after about ten tasks. That's what [issue #18](https://github.com/cramt/m365-copilot-proxy/issues/18)
+day's budget is gone after about ten tasks. That's what [issue #18](https://github.com/Bertogim/m365-copilot-proxy-opencode/issues/18)
 ran into; a shorter prompt doesn't help. Both budgets reset at **midnight UTC**, the weekly one on Monday.
 
 What the proxy does about it:

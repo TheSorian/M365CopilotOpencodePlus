@@ -745,7 +745,7 @@ When you create a worktree outside the current working directory, consider using
 
   const piSystem = "You are pi, a coding agent. Use your tools to do the work.";
 
-  const tool = (name: string, props: Record<string, unknown>, description = ""): ToolDef => ({
+  const tool = (name: string, props: Record<string, { type: string }>, description = ""): ToolDef => ({
     type: "function",
     function: { name, description, parameters: { type: "object", properties: props, required: [] } },
   });
@@ -770,7 +770,7 @@ When you create a worktree outside the current working directory, consider using
     expect(isOpenCodeHarness([{ role: "user", content: openCodeSystem }])).toBe(false);
   });
 
-  it("drops Code Mode, the skills inventory and the false tool catalogue", async () => {
+  it("drops Code Mode, the skills inventory, the false tool catalogue and the harness prose", async () => {
     const { trimOpenCodeSystemPrompt } = await import("./tools.js");
     const out = trimOpenCodeSystemPrompt(openCodeSystem);
     expect(out).not.toContain("# Code Mode");
@@ -778,8 +778,11 @@ When you create a worktree outside the current working directory, consider using
     expect(out).not.toContain("<available_skills>");
     expect(out).not.toContain("Skills provide specialized instructions");
     expect(out).not.toContain("opencode (8 tools)");
-    // What is true survives: the persona, the user's rules and the environment.
-    expect(out).toContain("running in OpenCode");
+    // OpenCode's own persona and harness rules are what the model gets confused by.
+    expect(out).not.toContain("running in OpenCode");
+    expect(out).not.toContain("# Harness");
+    expect(out).not.toContain("Prefer dedicated tools over shell commands");
+    // What is true survives: the user's rules and the environment.
     expect(out).toContain("Instructions from: /project/AGENTS.md");
     expect(out).toContain("Responde en español y usa shell para todo.");
     expect(out).toContain("<env>\n  Working directory: /project");
@@ -787,12 +790,13 @@ When you create a worktree outside the current working directory, consider using
     expect(out.length).toBeLessThan(openCodeSystem.length);
   });
 
-  it("keeps the user's instructions when there is no skills block", async () => {
+  it("keeps only the user's rules and env when there is no skills block", async () => {
     const { trimOpenCodeSystemPrompt } = await import("./tools.js");
     const out = trimOpenCodeSystemPrompt(
       "You are an AI agent running in OpenCode.\n\n# Code Mode\nUse execute.\n\nInstructions from: /p/AGENTS.md\nrule\n\n<env>\n  cwd: /p\n</env>",
     );
     expect(out).not.toContain("# Code Mode");
+    expect(out).not.toContain("running in OpenCode");
     expect(out).toContain("Instructions from: /p/AGENTS.md\nrule");
     expect(out).toContain("<env>");
   });
@@ -800,10 +804,10 @@ When you create a worktree outside the current working directory, consider using
   it("trims the offered tools to the ones that can drive a coding loop", async () => {
     const { trimOpenCodeTools } = await import("./tools.js");
     const names = trimOpenCodeTools(openCodeTools).map((t) => t.function.name);
-    for (const keep of ["shell", "read", "edit", "write", "grep", "glob"]) {
+    for (const keep of ["shell", "read", "edit", "write", "grep", "glob", "question"]) {
       expect(names).toContain(keep);
     }
-    for (const drop of ["execute", "skill", "question"]) {
+    for (const drop of ["execute", "skill"]) {
       expect(names).not.toContain(drop);
     }
   });
