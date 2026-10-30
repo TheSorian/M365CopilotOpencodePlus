@@ -71,6 +71,21 @@ Los remotos:
 De `origin` no se trae nada: es solo destino. Las novedades entran por `bertogim` y
 `upstream`, y como `origin` es el remoto por defecto, `git push` a secas ya sube a tu repo.
 
+## Por que no se pierden nuestros cambios
+
+- `NOTAS.md`, `start-m365.cmd` y `update-m365.cmd` no existen en ninguno de los dos repos
+  de origen: un merge no puede borrarlos.
+- En los ficheros compartidos (`handler.ts`, `tools.ts`, `fenced.ts`...) git fusiona línea a
+  línea: o aplica las dos cosas, o para con un conflicto. Nunca descarta en silencio un
+  trozo que solo hemos tocado nosotros.
+- Todo queda en la historia: el commit de merge lleva el anterior como padre, y además se
+  sube a `origin`. Deshacer es `git reset --hard pre-update`.
+- Lo que sí puede pasar es que un merge aplique limpio y deje un parche muerto (una función
+  renombrada, una rama que ya no se usa). Para eso está `scripts/check-ours.mjs`:
+  `update-m365.cmd` lo ejecuta tras fusionar y para si falta alguno. A mano:
+
+      node scripts\check-ours.mjs
+
 Si algún día quieres el original literal (nada del fork), probado que aplica limpio:
 
     git checkout -b original upstream/main

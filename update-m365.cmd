@@ -41,6 +41,11 @@ git merge --no-edit upstream/main
 if errorlevel 1 goto conflicto
 
 echo.
+echo === Comprobando que nuestros parches siguen ahi ===
+node scripts\check-ours.mjs
+if errorlevel 1 goto deltas
+
+echo.
 echo === Reinstalando, compilando y probando ===
 call pnpm.cmd install
 if errorlevel 1 exit /b 1
@@ -68,4 +73,10 @@ echo Conserva la logica de OpenCode del fork y luego:
 echo   pnpm.cmd install ^&^& pnpm.cmd build ^&^& pnpm.cmd test
 echo Para descartar el merge:      git merge --abort
 echo Para volver atras del todo:  git reset --hard pre-update
+exit /b 1
+
+:deltas
+echo.
+echo Un merge ha dejado fuera alguno de nuestros parches (lista de arriba).
+echo Para volver atras:  git reset --hard pre-update
 exit /b 1
