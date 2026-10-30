@@ -8,7 +8,10 @@ Repo propio: `TheSorian/M365CopilotOpencodePlus` (remote `origin`, privado). Sal
 
     start-m365.cmd          (doble clic; deja la ventana abierta)
 
-Luego en OpenCode: `/models` -> `M365 · GPT-6.1 Sol`.
+La primera vez abre una ventana de Chromium para el login (contraseña + MFA). Después
+los tokens se refrescan solos y esa ventana ya no sale.
+
+Con el proxy corriendo, en OpenCode: `/models` -> `M365 · GPT-6.1 Sol`.
 
 El proxy tiene que estar corriendo antes de usar el modelo. Si lo paras, ese modelo falla.
 
@@ -46,12 +49,27 @@ Para desactivar el recorte del todo: `set M365_OPENCODE_TRIM=0`.
 4. Error 429 / `m365_throttled` -> cupo agotado (~100 turnos, +1,6/min). Esperar; no reintentar en bucle.
 5. El proxy no arranca -> `pnpm.cmd install && pnpm.cmd build` y mirar `~/.config/opencode-m365/debug.log`.
 
-## Actualizar desde el original
+## Actualizar (viene de dos sitios)
 
-    update-m365.cmd         fusiona upstream/main, recompila y pasa los tests
-    git reset --hard pre-update    deshacer el último merge
+Este repo es la unificación de dos: el fork de Bertogim (los arreglos para OpenCode) y el
+original de cramt (el protocolo). `update-m365.cmd` fusiona los dos, en ese orden, y
+después reinstala, compila, pasa los tests y sube el resultado a `origin`:
 
-Para subir tus cambios: `git push` (va a tu repo, `origin`).
+    update-m365.cmd
+
+Si hay conflicto, para y dice dónde mirar:
+
+    git merge --abort              descartar el merge
+    git reset --hard pre-update    volver a como estaba antes de fusionar
+
+Los remotos:
+
+    origin      tu repo (TheSorian/M365CopilotOpencodePlus) — aquí se sube
+    bertogim    el fork del que salimos (arreglos de OpenCode)
+    upstream    el original de cramt (lo que sigue Bertogim)
+
+De `origin` no se trae nada: es solo destino. Las novedades entran por `bertogim` y
+`upstream`, y como `origin` es el remoto por defecto, `git push` a secas ya sube a tu repo.
 
 Si algún día quieres el original literal (nada del fork), probado que aplica limpio:
 
