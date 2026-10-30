@@ -15,6 +15,11 @@ Con el proxy corriendo, en OpenCode: `/models` -> `M365 · GPT-6.1 Sol`.
 
 El proxy tiene que estar corriendo antes de usar el modelo. Si lo paras, ese modelo falla.
 
+Antes de arrancar mira si hay novedades en `bertogim` y `upstream` (un `fetch`, ~2 s). Si
+las hay, las lista y pregunta: **S** actualiza y luego arranca, **N** arranca con lo que ya
+está compilado. Si no contestas en 15 s, arranca sin tocar nada. Nunca fusiona por su
+cuenta. Para que ni mire: `set M365_NO_UPDATE_CHECK=1`.
+
 ## Los ajustes que importan
 
 Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:

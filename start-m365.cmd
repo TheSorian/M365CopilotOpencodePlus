@@ -3,6 +3,8 @@ setlocal
 rem Arranca el proxy M365 Copilot en el puerto indicado (por defecto 4141).
 rem Primer arranque: abre un navegador para iniciar sesion a mano (MFA push/FIDO2/Okta valen).
 rem Despues de ese primer login, los tokens se refrescan solos desde la cache MSAL.
+rem Antes de arrancar mira si hay novedades en los repos de origen. No fusiona solo:
+rem pregunta, y si no contestas en 15 s arranca con lo que ya esta compilado.
 
 set M365_ENABLE_INTERACTIVE_APPROVAL=1
 rem El login usa por defecto UA de Linux, locale en-GB y zona Europe/Copenhagen.
@@ -29,6 +31,32 @@ if exist "%USERPROFILE%\.config\opencode-m365\debug.log" (
   )
 )
 
+rem --- Novedades en los repos de origen (esto solo mira, no toca nada) ---
+if "%M365_NO_UPDATE_CHECK%"=="1" goto arrancar
+
+git fetch --multiple bertogim upstream --quiet 2>nul
+set NEW=0
+for /f %%c in ('git rev-list --count main..bertogim/main main..upstream/main') do set NEW=%%c
+if "%NEW%"=="0" goto arrancar
+
+echo.
+echo === %NEW% commit^(s^) nuevos en los repos de origen ===
+echo --- bertogim/main ---
+git log --oneline main..bertogim/main
+echo --- upstream/main ---
+git log --oneline main..upstream/main
+echo.
+choice /C SN /T 15 /D N /M "Actualizar antes de arrancar (S/n)"
+if errorlevel 2 goto arrancar
+
+call update-m365.cmd
+if not errorlevel 1 goto arrancar
+
+echo.
+choice /C SN /T 20 /D S /M "La actualizacion fallo. Arrancar con lo ya compilado (S/n)"
+if errorlevel 2 exit /b 1
+
+:arrancar
 if "%~1"=="" (
   node packages\proxy\bin\m365-proxy.mjs 4141
 ) else (
