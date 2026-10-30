@@ -1,6 +1,8 @@
 # Notas de esta instalación (M365 Copilot como backend de OpenCode)
 
-Repo: fork `Bertogim/m365-copilot-proxy-opencode` (origin) + original `cramt/m365-copilot-proxy` (remote `upstream`).
+Repo propio: `TheSorian/M365CopilotOpencodePlus` (remote `origin`, privado). Sale del fork
+`Bertogim/m365-copilot-proxy-opencode` (remote `bertogim`) y del original
+`cramt/m365-copilot-proxy` (remote `upstream`).
 
 ## Arrancar
 
@@ -48,6 +50,8 @@ Para desactivar el recorte del todo: `set M365_OPENCODE_TRIM=0`.
 
     update-m365.cmd         fusiona upstream/main, recompila y pasa los tests
     git reset --hard pre-update    deshacer el último merge
+
+Para subir tus cambios: `git push` (va a tu repo, `origin`).
 
 Si algún día quieres el original literal (nada del fork), probado que aplica limpio:
 
