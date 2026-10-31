@@ -31,6 +31,7 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_DEBUG=1                         log en ~/.config/opencode-m365/debug.log
     set M365_AVOID_THROTTLING=1              frena antes de agotar el cupo
     set M365_OPENCODE_TOOLS=...              allowlist propia: 10 tools, con skill y execute
+    set M365_IMAGE_DIR=%USERPROFILE%\Pictures\m365   imágenes generadas (por defecto ~/Pictures)
 
 Lo del UA/locale/zona no es cosmético: el login abre un Chromium visible y, con los
 valores por defecto, la huella dice "Linux, en-GB, Copenhague" mientras el navegador
