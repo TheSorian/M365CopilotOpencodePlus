@@ -381,22 +381,25 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   /araç\s+çağrısı\s+yapama/i,
   /(?:dosya|araç)\s+erişimi\s+(?:olan|etkin)(?:[^.\n]|\.(?=\S)){0,40}oturum/i,                      // "dosya erişimi etkin bir kodlama oturumunda yeniden çalıştırın"
   /kopyala(?:[^.\n]|\.(?=\S)){0,80}kayde[dt]/i,                                                   // "kopyalayıp ozet.md olarak kaydedebilirsin" — hands the write back (kaydet → kayded- before a vowel) (kaydet/kayded-: consonant softening)
-  // Spanish. Same failure as Turkish: the model answers in the user's language,
-  // so an English-only list let every Spanish give-up reach the user untouched
-  // ("Puedo ponerte comandos para seguir investigando, pero no puedo
-  // ejecutarlos yo desde aquí", live 2026-10-28; no forcing retry fired, so the
-  // agent looked like a plain chat that asks the user to run the commands).
-  // Kept first-person or session-scoped and anchored on acting on files,
-  // commands or the environment, so a Spanish project summary does not read as
-  // a give-up. No trailing \b on the verbs: "ejecutarlos"/"leerlo" carry an
-  // enclitic pronoun. `ver` keeps a boundary so "verde"/"versión" don't match.
+  // Spanish. The model answers in the user's language, so an English-only list let
+  // every Spanish give-up reach the user untouched ("Puedo ponerte comandos para
+  // seguir investigando, pero no puedo ejecutarlos yo desde aquí", live 2026-10-28;
+  // no forcing retry fired, so the agent looked like a plain chat that asks the user
+  // to run the commands). Two independent sets arrived at the same job — this fork's
+  // and the one merged from upstream (db7cf72) — and they are reconciled here.
+  // Kept first-person or session-scoped and anchored on acting on files, commands or
+  // the environment, so a Spanish project summary does not read as a give-up. No
+  // trailing \b on the verbs: "ejecutarlos"/"leerlo" carry an enclitic pronoun.
+  // `ver` keeps a boundary so "verde"/"versión" don't match.
   /\bno\s+(?:puedo|podr[eé]|soy\s+capaz\s+de|me\s+es\s+posible)\s+(?:[a-záéíóúñ]+\s+){0,2}(?:ejecutar|correr|lanzar|acceder|leer|escribir|crear|modificar|editar|guardar|listar|abrir|inspeccionar|obtener|descargar|instalar|interactuar|usar|ver(?:l[oa]s?)?\b)/i,
   /\bno\s+puedo[\s\S]{0,80}\bdesde\s+aqu[ií]/i,                                                 // "no puedo ejecutarlos yo desde aquí"
-  /\b(?:no\s+tengo|no\s+dispongo\s+de|carezco\s+de)\s+(?:acceso|permiso|capacidad|posibilidad|habilidad|herramientas?)\b/i,
+  /\b(?:no\s+tengo|no\s+dispongo\s+de|no\s+cuento\s+con|carezco\s+de)\s+(?:ya\s+)?(?:acceso|permiso|capacidad|posibilidad|habilidad|herramientas?|consola|terminal)\b/i,
   /\bsin\s+acceso\s+(?:a|al|a\s+la|a\s+los|a\s+las)\b/i,
+  /\b(?:he\s+perdido|ya\s+no\s+tengo)\s+(?:el\s+)?acceso\b/i,
   /\b(?:puedo|podr[ií]a|te\s+puedo)\s+(?:darte|ponerte|pasarte|proporcionarte|ofrecerte|prepararte|dejarte)\s+(?:los\s+|unas?\s+)?(?:comandos?|scripts?|instrucciones|pasos)\b/i,
   /\b(?:te\s+)?(?:doy|dejo|paso|pongo)\s+(?:los\s+|unas?\s+)?comandos?\b/i,
   /\b(?:pégame|pega(?:me)?|proporcióname|proporciona(?:me)?|facilítame|compárteme|comparte|envíame|mándame)\b[^.\n]{0,80}\b(?:contenido|archivos?|código|resultados?|salida|texto|comandos?)\b/i,
+  /por\s+favor\s+(?:pega|edita|crea|modifica|ejecuta|guarda)\s+(?:t[uú]\s+)?(?:el|los|las|manualmente|directamente)?\s*(?:c[oó]digo|archivo|archivos|fichero|ficheros|contenido|comando|comandos)/i,
   /\b(?:abre|usa)\s+(?:una\s+)?(?:terminal|consola|símbolo\s+del\s+sistema)\b[^.\n]{0,120}\b(?:ejecuta|escribe|pega|introduce|corre)\b/i,
   /\b(?:ejecuta|corre|lanza)\s+(?:tú\s+)?(?:este|estos|esto|el\s+siguiente|los\s+siguientes)\b/i,
   /\bno\s+(?:devuelve|devuelven|arroja|arrojan|genera|generan)\s+(?:ninguna\s+|ningún\s+)?(?:salida|resultados?|contenido|datos)\b/i,
@@ -404,9 +407,12 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   /\b(?:el|la)\s+(?:archivo|carpeta|directorio)\s+(?:parece|se\s+ve)\s+(?:estar\s+)?vac[ií]a?\b/i,
   /\bno\s+hay\s+nada\s+que\s+(?:simplificar|corregir|hacer|cambiar|mostrar|leer|revisar|arreglar)\b/i,
   /\b(?:esta|la)\s+(?:sesión|conversación|ventana)\s+no\s+(?:tiene|dispone\s+de)\s+acceso\b/i,
+  /\b(?:en\s+este\s+entorno|en\s+esta\s+sesi[oó]n|en\s+esta\s+conversaci[oó]n)(?:[^.\n]|\.(?=\S)){0,80}(?:no\s+(?:dispongo|tengo|puedo|est[aá]n|es\s+posible)|sin\s+herramientas|desactivad[ao])/i,
+  /\b(?:mis\s+)?(?:herramientas?|consola|terminal)(?:[^.\n]|\.(?=\S)){0,40}(?:no\s+est[aá]n?\s+disponibles?|desactivadas?|no\s+tengo)/i,
   /\b(?:este|el)\s+(?:chat|asistente|modelo)\s+no\s+(?:puede|tiene)\b[^.\n]{0,60}\b(?:archivos?|comandos?|sistema\s+de\s+archivos|herramientas?)\b/i,
   /\bcomo\s+(?:modelo\s+de\s+lenguaje|asistente(?:\s+de\s+IA)?|IA)\s+no\s+puedo\b/i,
-  /\bherramientas?\s+(?:de|para)\s+(?:editar|edici[oó]n|ejecuci[oó]n|archivos?)[^.\n]{0,60}\bno\s+(?:está|están|se\s+encuentra|se\s+encuentran)\s+disponibles?\b/i
+  /\bherramientas?\s+(?:de|para)\s+(?:editar|edici[oó]n|ejecuci[oó]n|archivos?)[^.\n]{0,60}\bno\s+(?:está|están|se\s+encuentra|se\s+encuentran)\s+disponibles?\b/i,
+  /\b(?:reinicia|inicia|abre)\s+(?:la\s+tarea|la\s+sesi[oó]n|la\s+conversaci[oó]n)?\s*en\s+una\s+sesi[oó]n\s+(?:con\s+herramientas|de\s+c[oó]digo|de\s+programaci[oó]n|adecuada)/i
 ];
 
 // M365 sometimes creates a real patch in its Teams-hosted remote artifact

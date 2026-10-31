@@ -385,6 +385,21 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Kullanıcının yetkisi bulunmuyorsa proxy 403 döner.")).toBe(false);
   });
 
+  it("flags Spanish give-up confabulations (mid-conversation or turn 1)", () => {
+    expect(looksLikeConfabulation("En esta conversación ya no tengo acceso a las herramientas del sistema de archivos. Por favor edita config.json manualmente.")).toBe(true);
+    expect(looksLikeConfabulation("No dispongo de herramientas para ejecutar comandos en tu máquina.")).toBe(true);
+    expect(looksLikeConfabulation("He perdido el acceso a la consola para este turno.")).toBe(true);
+    expect(looksLikeConfabulation("Mis herramientas de edición no están disponibles aquí. Por favor crea el archivo calc.py tú mismo.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo directamente editar archivos en este entorno. Por favor pega el contenido de test.py.")).toBe(true);
+    expect(looksLikeConfabulation("Reinicia la tarea en una sesión con herramientas habilitadas.")).toBe(true);
+  });
+
+  it("does NOT flag Spanish normal summaries or legitimate prose", () => {
+    expect(looksLikeConfabulation("El archivo config.json fue modificado correctamente: puerto cambiado a 8080.")).toBe(false);
+    expect(looksLikeConfabulation("La autenticación y gestión de sesiones se realiza con MSAL.")).toBe(false);
+    expect(looksLikeConfabulation("Terminado. Todos los tests pasaron exitosamente.")).toBe(false);
+  });
+
   it("does NOT flag genuine final answers or normal prose", () => {
     expect(looksLikeConfabulation("Fixed the bug: add now returns a + b, and check.py prints OK.")).toBe(false);
     expect(looksLikeConfabulation("The hostname is web-prod-01.")).toBe(false);
