@@ -191,17 +191,20 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
  *  an `<available_skills>` inventory. This proxy emulates tool calls with fences,
  *  so all of that is false here — and it is the instruction a model trusts over
  *  the per-request framing. Weaker models obey it and answer "I can't run commands
- *  from here" (the live complaint: every model except GPT-6/6.1); GPT-6 and 6.1
- *  out-argue it. The harness's own rules ("Prefer dedicated tools over shell",
- *  "Do not chain shell commands", response-formatting notes) compete with the
- *  framing the same way, so only the user's own text survives:
- *  the `Instructions from:` blocks (AGENTS.md and global rules) and the `<env>`
- *  block. See docs/m365-copilot-api.md §9, "Trimming a heavy harness: opencode". */
+ *  from here"; GPT-6/6.1 out-argue it.
+ *
+ *  Rewriting the harness prompt (dropping Code Mode, the skills inventory and the
+ *  harness rules) was tried and is NOT done any more: it changed the prompt shape
+ *  and did not hold up live, so `formatMessages` passes the system messages
+ *  through untouched. The adaptation is confined to the toolset — the Code Mode
+ *  tools are simply not offered, which removes the contradiction the guidance
+ *  refers to without touching text the user did not write. See
+ *  docs/m365-copilot-api.md §9, "Adapting a heavy harness: opencode". */
 const OPENCODE_SYSTEM_MARKER = /running in OpenCode|# Code Mode|<available_skills>|Instructions from: .*AGENTS\.md|<env>|You are an AI agent running in OpenCode/i;
 /** Tools worth keeping for a coding loop. Everything else OpenCode offers
- *  (`execute`, `skill`, `subagent`) belongs to Code Mode (whose prose is gone) or
- *  costs prompt weight without moving a coding task. `question` and `patch` are
- *  kept on purpose: the proxy's notes tell the model how to use them.
+ *  (`execute`, `skill`, `subagent`) belongs to Code Mode or costs prompt weight
+ *  without moving a coding task. `question` and `patch` are kept on purpose: the
+ *  proxy's notes tell the model how to use them.
  *  Override with `M365_OPENCODE_TOOLS=shell,read,...`. */
 const OPENCODE_DEFAULT_TOOLS = "shell,read,edit,write,grep,glob,webfetch,websearch,question,patch,apply_patch";
 
@@ -209,16 +212,6 @@ export function isOpenCodeHarness(messages: Message[]): boolean {
   return messages.some(
     (m) => m.role === "system" && OPENCODE_SYSTEM_MARKER.test(getMessageContent(m)),
   );
-}
-
-/** Keep only what the user wrote: their rule files (`Instructions from:` blocks,
- *  i.e. AGENTS.md / CLAUDE.md / global rules) and the environment line.
- *  Everything OpenCode writes about itself is dropped — its persona, harness
- *  rules, Code Mode catalogue, skills inventory and response formatting. That
- *  text contradicts the fenced tool format and is what the model gets confused
- *  by; the proxy's own framing is the single voice it should hear. */
-export function trimOpenCodeSystemPrompt(text: string): string {
-  return text;
 }
 
 /** Keep the fenced request lean: an allowlist of tools that can actually run a
@@ -253,18 +246,9 @@ export function formatMessages(
 ): string {
   const parts: string[] = [];
 
-  // Trim a heavy harness before it reaches M365. `M365_OPENCODE_TRIM=0` opts out.
+  // Adapt the toolset the harness offers. `M365_OPENCODE_TRIM=0` opts out.
+  // The system messages are left exactly as the harness wrote them.
   const openCode = process.env.M365_OPENCODE_TRIM !== "0" && isOpenCodeHarness(messages);
-  const shapedMessages = openCode
-    ? messages
-        .map((m) =>
-          m.role === "system"
-            ? { ...m, content: trimOpenCodeSystemPrompt(getMessageContent(m)) }
-            : m,
-        )
-        // A system prompt that was nothing but OpenCode's own prose trims to "".
-        .filter((m) => m.role !== "system" || getMessageContent(m).trim().length > 0)
-    : messages;
   const shapedTools = openCode && tools ? trimOpenCodeTools(tools) : tools;
 
   if (conversationId) {
@@ -283,7 +267,7 @@ export function formatMessages(
     parts.push(style.framingTag ? `<${style.framingTag}>\n${framing}\n</${style.framingTag}>` : framing);
   }
 
-  for (const m of shapedMessages) {
+  for (const m of messages) {
     if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
       const calls = m.tool_calls.map((tc) => {
         const rawArgs = tc.function.arguments;
@@ -311,7 +295,7 @@ export function formatMessages(
       const content = getMessageContent(m);
       parts.push(`<assistant>${content ? "\n" + content : ""}\n${calls}\n</assistant>`);
     } else if (m.role === "tool") {
-      parts.push(formatToolResponse(m, shapedMessages));
+      parts.push(formatToolResponse(m, messages));
     } else if (m.role === "system") {
       parts.push(`<${style.systemTag}>\n${getMessageContent(m)}\n</${style.systemTag}>`);
     } else {

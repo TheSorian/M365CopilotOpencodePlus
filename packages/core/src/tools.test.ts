@@ -770,35 +770,20 @@ When you create a worktree outside the current working directory, consider using
     expect(isOpenCodeHarness([{ role: "user", content: openCodeSystem }])).toBe(false);
   });
 
-  it("drops Code Mode, the skills inventory, the false tool catalogue and the harness prose", async () => {
-    const { trimOpenCodeSystemPrompt } = await import("./tools.js");
-    const out = trimOpenCodeSystemPrompt(openCodeSystem);
-    expect(out).not.toContain("# Code Mode");
-    expect(out).not.toContain("execute");
-    expect(out).not.toContain("<available_skills>");
-    expect(out).not.toContain("Skills provide specialized instructions");
-    expect(out).not.toContain("opencode (8 tools)");
-    // OpenCode's own persona and harness rules are what the model gets confused by.
-    expect(out).not.toContain("running in OpenCode");
-    expect(out).not.toContain("# Harness");
-    expect(out).not.toContain("Prefer dedicated tools over shell commands");
-    // What is true survives: the user's rules and the environment.
-    expect(out).toContain("Instructions from: /project/AGENTS.md");
-    expect(out).toContain("Responde en español y usa shell para todo.");
-    expect(out).toContain("<env>\n  Working directory: /project");
-    expect(out).not.toContain("When you create a worktree");
-    expect(out.length).toBeLessThan(openCodeSystem.length);
-  });
-
-  it("keeps only the user's rules and env when there is no skills block", async () => {
-    const { trimOpenCodeSystemPrompt } = await import("./tools.js");
-    const out = trimOpenCodeSystemPrompt(
-      "You are an AI agent running in OpenCode.\n\n# Code Mode\nUse execute.\n\nInstructions from: /p/AGENTS.md\nrule\n\n<env>\n  cwd: /p\n</env>",
+  it("passes the harness prompt through untouched", async () => {
+    const { formatMessages } = await import("./tools.js");
+    const out = formatMessages(
+      [{ role: "system", content: openCodeSystem }, { role: "user", content: "hola" }],
+      openCodeTools,
+      undefined,
+      "cid",
+      "baseline",
     );
-    expect(out).not.toContain("# Code Mode");
-    expect(out).not.toContain("running in OpenCode");
-    expect(out).toContain("Instructions from: /p/AGENTS.md\nrule");
-    expect(out).toContain("<env>");
+    // Rewriting the harness prompt was tried and reverted: it is sent verbatim.
+    expect(out).toContain("# Code Mode");
+    expect(out).toContain("<available_skills>");
+    expect(out).toContain("Instructions from: /project/AGENTS.md");
+    expect(out).toContain("<env>\n  Working directory: /project");
   });
 
   it("trims the offered tools to the ones that can drive a coding loop", async () => {
@@ -823,7 +808,7 @@ When you create a worktree outside the current working directory, consider using
     expect(names).toContain("create_file");
   });
 
-  it("renders a lean request for OpenCode and leaves pi byte-identical", async () => {
+  it("renders the lean toolset for OpenCode and leaves pi byte-identical", async () => {
     const { formatMessages } = await import("./tools.js");
     const user = { role: "user", content: "lista los archivos" };
 
@@ -834,10 +819,10 @@ When you create a worktree outside the current working directory, consider using
       "cid",
       "baseline",
     );
-    expect(oc).not.toContain("# Code Mode");
-    expect(oc).not.toContain("<available_skills>");
-    expect(oc).not.toContain("Run JavaScript");
+    // The Code Mode tools are not offered, so the guidance they contradict is moot.
     expect(oc).toContain("```shell");
+    expect(oc).not.toContain("```execute");
+    expect(oc).not.toContain("```skill");
     expect(oc).toContain("Instructions from: /project/AGENTS.md");
     expect(oc).toContain("<user>\nlista los archivos\n</user>");
 
@@ -849,7 +834,7 @@ When you create a worktree outside the current working directory, consider using
       "baseline",
     );
     expect(pi).toContain(piSystem);
-    expect(pi).toContain("Run JavaScript");
+    expect(pi).toContain("```execute");
   });
 
   it("can be disabled with M365_OPENCODE_TRIM=0", async () => {
@@ -863,8 +848,8 @@ When you create a worktree outside the current working directory, consider using
         "cid",
         "baseline",
       );
-      expect(out).toContain("# Code Mode");
-      expect(out).toContain("Run JavaScript");
+      expect(out).toContain("```execute");
+      expect(out).toContain("```skill");
     } finally {
       delete process.env.M365_OPENCODE_TRIM;
     }

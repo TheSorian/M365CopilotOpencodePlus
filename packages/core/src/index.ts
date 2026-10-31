@@ -121,7 +121,6 @@ export {
   formatToolChoiceInstruction,
   getMessageContent,
   isOpenCodeHarness,
-  trimOpenCodeSystemPrompt,
   trimOpenCodeTools,
   parseToolCalls,
   looksLikeConfabulation,

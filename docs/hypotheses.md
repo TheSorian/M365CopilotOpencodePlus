@@ -5697,17 +5697,23 @@ in prose; GPT-6/6.1 out-argue it, which is exactly the split the user reported. 
 is also dead weight: the nested tools are not reachable through the fenced format, and the
 skills inventory advertises a `skill` tool that the trim removes.
 
-**Change.** `formatMessages` now detects opencode (system message matches `running in
-OpenCode` / `# Code Mode`) and, for that request only, keeps **only the user's own text** —
-the `Instructions from:` blocks (AGENTS.md/CLAUDE.md/global rules) and `<env>` — dropping
-the persona, the `# Harness` rules, `# Code Mode` through `</available_skills>`, the tool
-catalogue and the response-formatting notes. It renders an allowlist of tools
-(`shell, read, edit, write, grep, glob, webfetch, websearch, question, patch, apply_patch`;
-`execute`, `skill`, `subagent` dropped). Captured turn: system 8,782 → ~155 chars, rendered
-request 16,731 → 6,685 (−60%), 12 → 8 tools. Parsing still uses the original `body.tools`.
-`M365_OPENCODE_TRIM=0` disables; `M365_OPENCODE_TOOLS=…` replaces the allowlist. Unit
-tests cover detection, both trim shapes, the renamed-shell/write fallback, the opt-out and
-a byte-identical non-opencode request.
+**Change (2026-10-28).** `formatMessages` detects opencode (system message matches `running in
+OpenCode` / `# Code Mode`) and, for that request only, rewrote the system message down to the
+user's own text — the `Instructions from:` blocks (AGENTS.md/CLAUDE.md/global rules) and
+`<env>` — dropping the persona, the `# Harness` rules, `# Code Mode` through
+`</available_skills>`, the tool catalogue and the response-formatting notes. Plus an allowlist
+of tools (`shell, read, edit, write, grep, glob, webfetch, websearch, question, patch,
+apply_patch`; `execute`, `skill`, `subagent` dropped). Captured turn: system 8,782 → ~155
+chars, rendered request 16,731 → 6,685 (−60%), 12 → 8 tools. Parsing still uses the original
+`body.tools`. `M365_OPENCODE_TRIM=0` disables; `M365_OPENCODE_TOOLS=…` replaces the allowlist.
+
+**Partial revert (2026-10-29).** The system-prompt rewrite was rolled back —
+`trimOpenCodeSystemPrompt()` returned the text unchanged — and that helper has since been
+removed entirely: the trimmed prompt changed behaviour and the refusal it was meant to fix
+came back. **The tool allowlist stayed**, and it is the part with a mechanism: `execute` (and
+the `skill` registry behind `skill`) is simply not offered, so the Code Mode sentence refers to
+a tool the request does not carry. Treat the text rewrite as a disconfirmed lever until someone
+runs a live A/B, not as a default to restore.
 
 **Follow-up (2026-10-29).** The `apply_patch` / `question` instructions that shipped as an
 opencode plugin (`plugins/opencode/m365-sol-prompt.mjs`) are now rendered by the proxy
@@ -5718,6 +5724,5 @@ state that a shell is **always** there (the "if a shell is available" wording re
 it isn't"), and the framings no longer forbid asking the user to paste a file.
 
 **Open.** No live A/B yet (n=0): the account was 429 `PerUserThrottled` from the probes
-that produced the capture. Falsifier: with the trim in place, `claude-sonnet` /
-`gpt-5.5` still give up on a tool task in a fresh opencode session, with no Code Mode text
-in the request.
+that produced the capture. Falsifier for the allowlist alone: `claude-sonnet` / `gpt-5.5` still
+give up on a tool task in a fresh opencode session while `execute`/`skill` are not offered.

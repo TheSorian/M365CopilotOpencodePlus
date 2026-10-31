@@ -1647,8 +1647,8 @@ describe("RESTORECONTEXT", () => {
     ];
     const original = JSON.stringify(messages);
     const prompt = await post(new SessionPool(), messages);
-    const recovered = prompt.split("INICIO DEL HISTORIAL RECUPERADO\n")[1]
-      .split("\nFIN DEL HISTORIAL RECUPERADO")[0];
+    const recovered = prompt.split("BEGIN RECOVERED HISTORY\n")[1]
+      .split("\nEND RECOVERED HISTORY")[0];
     expect(recovered.split("\n")).toHaveLength(700);
     expect(recovered).not.toContain("HISTORY_LINE_0\n");
     expect(recovered).toContain("HISTORY_LINE_899");
@@ -1674,14 +1674,14 @@ describe("RESTORECONTEXT", () => {
     expect(prompt).toContain("ORIGINAL_TASK_MARKER");
     expect(prompt).toContain("pwd");
     expect(prompt).toContain("REAL_WORKSPACE_RESULT");
-    expect(prompt).toContain("INICIO DEL HISTORIAL RECUPERADO");
+    expect(prompt).toContain("BEGIN RECOVERED HISTORY");
     expect(scripted.newConversations).toBe(rotations + 1);
     messages.push(
       { role: "assistant", content: "Context received." },
       { role: "user", content: "Continue normally." },
     );
     const next = await post(pool, messages);
-    expect(next).not.toContain("INICIO DEL HISTORIAL RECUPERADO");
+    expect(next).not.toContain("BEGIN RECOVERED HISTORY");
     expect(scripted.newConversations).toBe(rotations + 1);
   });
 
@@ -1703,8 +1703,8 @@ describe("RESTORECONTEXT", () => {
     const original = JSON.stringify(messages);
     for (const stream of [false, true]) {
       const prompt = await post(new SessionPool(), messages, stream);
-      const recovered = prompt.split("INICIO DEL HISTORIAL RECUPERADO\n")[1]
-        .split("\nFIN DEL HISTORIAL RECUPERADO")[0];
+      const recovered = prompt.split("BEGIN RECOVERED HISTORY\n")[1]
+        .split("\nEND RECOVERED HISTORY")[0];
       expect(recovered.split("\n")).toHaveLength(700);
       expect(recovered).not.toContain("ORIGINAL_TASK:");
       expect(recovered).not.toContain("LATEST_STEERING:");
@@ -1724,7 +1724,7 @@ describe("RESTORECONTEXT", () => {
       const prompt = await post(new SessionPool(), [
         { role: "user", content: "Initial task" }, latest,
       ]);
-      expect(prompt).not.toContain("INICIO DEL HISTORIAL RECUPERADO");
+      expect(prompt).not.toContain("BEGIN RECOVERED HISTORY");
     }
   });
 
@@ -1732,7 +1732,7 @@ describe("RESTORECONTEXT", () => {
     const prompt = await post(new SessionPool(), [{
       role: "user", content: [{ type: "text", text: "RESTORECONTEXT" }],
     }]);
-    expect(prompt).toContain("No hay historial anterior disponible");
+    expect(prompt).toContain("No prior history is available in this request.");
   });
 });
 

@@ -89,12 +89,24 @@ async function reserveImageFile(directory: string, extension: string) {
 }
 
 // Save generated images on the proxy machine, never embed them in chat.
+/** Where generated images are written. `M365_IMAGE_DIR` wins; otherwise the
+ *  platform's picture folder. Never a hard-coded localized name: `~/Imágenes`
+ *  only exists on a Spanish Windows install, so on any other machine the proxy
+ *  would invent a stray folder next to the real one. */
+async function imageDirectory(): Promise<string> {
+  const configured = process.env.M365_IMAGE_DIR?.trim();
+  if (configured) return configured;
+  const xdg = process.env.XDG_PICTURES_DIR?.trim();
+  if (xdg) return xdg;
+  const path = await import("node:path");
+  const os = await import("node:os");
+  return path.join(os.homedir(), "Pictures");
+}
+
 async function renderImagesMarkdown(images: CapturedImage[]): Promise<string> {
   if (images.length === 0) return "";
   const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  const os = await import("node:os");
-  const directory = path.join(os.homedir(), "Imágenes");
+  const directory = await imageDirectory();
   const results: string[] = [];
   let artifactToken: string | null = null;
   try {
@@ -153,8 +165,6 @@ async function renderImagesMarkdown(images: CapturedImage[]): Promise<string> {
 async function sanitizeImagePayloads(text: string): Promise<string> {
   if (!/data:image\/|iVBORw0KGgo|\/9j\/|UklGR/i.test(text)) return text;
   const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  const os = await import("node:os");
 
   const save = async (encoded: string): Promise<string> => {
     try {
@@ -182,7 +192,7 @@ async function sanitizeImagePayloads(text: string): Promise<string> {
       } else {
         throw new Error("Unrecognized or incomplete image");
       }
-      const directory = path.join(os.homedir(), "Imágenes");
+      const directory = await imageDirectory();
       await fs.mkdir(directory, { recursive: true });
       const { filename, handle } = await reserveImageFile(directory, extension);
       let complete = false;
@@ -1190,27 +1200,10 @@ export async function handleChatCompletion(
     if (result.kind === "text") {
       result.text = await sanitizeImagePayloads(result.text);
     } else if (result.kind === "tools") {
-      const cleanValue = async (value: unknown): Promise<unknown> => {
-        if (typeof value === "string") return sanitizeImagePayloads(value);
-        if (Array.isArray(value)) return Promise.all(value.map(cleanValue));
-        if (value !== null && typeof value === "object") {
-          const entries = await Promise.all(Object.entries(value).map(
-            async ([key, item]) => [key, await cleanValue(item)] as const
-          ));
-          return Object.fromEntries(entries);
-        }
-        return value;
-      };
-      for (const call of result.toolCalls) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(call.function.arguments);
-        } catch {
-          call.function.arguments = await sanitizeImagePayloads(call.function.arguments);
-          continue;
-        }
-        call.function.arguments = JSON.stringify(await cleanValue(parsed));
-      }
+      // Tool arguments are NOT rewritten. A `write`/`edit` call whose content
+      // legitimately carries image bytes (a fixture, an asset) would otherwise
+      // be replaced by a "saved on the proxy" note and the edit would corrupt
+      // the user's file. Image payloads only show up in prose and errors.
     } else {
       const content = await sanitizeImagePayloads(await result.resp.text());
       const headers = new Headers(result.resp.headers);
