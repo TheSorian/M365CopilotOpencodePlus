@@ -77,6 +77,17 @@ Los remotos:
 De `origin` no se trae nada: es solo destino. Las novedades entran por `bertogim` y
 `upstream`, y como `origin` es el remoto por defecto, `git push` a secas ya sube a tu repo.
 
+**Antes de fusionar `bertogim`, mira cómo está:** el 2026-11-01 su `main` (0682242) trae 18
+tests en rojo — está a mitad de un cambio grande (el proxy pasa a escribir su propio system
+prompt en `packages/prompts/`, sin bloque `<tools>`). Fusionarlo ahora importaría esos fallos
+y cambiaría de golpe cómo se le pide actuar al modelo. Compruébalo en un clon aparte antes:
+
+    git -C <clon-de-bertogim> fetch && git checkout bertogim/main
+    pnpm install && pnpm build && pnpm test
+
+Mientras siga en rojo, `upstream` (cramt) sí se puede fusionar solo: es la línea del protocolo
+y va por detrás.
+
 ## Por que no se pierden nuestros cambios
 
 - `NOTAS.md`, `start-m365.cmd` y `update-m365.cmd` no existen en ninguno de los dos repos
