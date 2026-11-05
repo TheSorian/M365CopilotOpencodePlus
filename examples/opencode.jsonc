@@ -1,0 +1,89 @@
+// Example OpenCode config for the M365 Copilot proxy.
+//
+//   1. Start the proxy (default port 4141):
+//        npx m365-proxy 4141      (or: pnpm run dev)
+//   2. Copy this file to ~/.config/opencode/opencode.jsonc (global) or
+//      ./opencode.jsonc (per project) and merge it with what you already have.
+//
+// `apiKey` is a placeholder: the proxy binds to localhost and validates no
+// credentials. Only model IDs the proxy actually serves are listed; run
+// `curl http://127.0.0.1:4141/v1/models` for the full set.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "m365": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "M365 Copilot (own account)",
+      "options": {
+        "baseURL": "http://127.0.0.1:4141/v1",
+        "apiKey": "not-needed"
+      },
+      "models": {
+        // Tool calling works best on Claude and GPT-5.5: both route agent-less
+        // and emit real fenced calls. `m365-copilot` is the plain chat model.
+        "claude-sonnet": {
+          "name": "Claude Sonnet (default)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "claude-sonnet-think-deeper": {
+          "name": "Claude Sonnet (reasoning)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "claude-opus-4.8": {
+          "name": "Claude Opus 4.8",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-5.5-think-deeper": {
+          "name": "GPT-5.5 (reasoning)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-5.6-think-deeper": {
+          "name": "GPT-5.6 (reasoning)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-6.1-sol": {
+          "name": "GPT-6.1 Sol",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "m365-copilot": {
+          "name": "M365 Copilot",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "quick": {
+          "name": "M365: Quick",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "think-deeper": {
+          "name": "M365: Think Deeper",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        }
+      }
+    }
+  },
+  "model": "m365/claude-sonnet",
+  "small_model": "m365/quick"
+}
