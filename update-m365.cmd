@@ -1,82 +1,84 @@
 @echo off
 setlocal
-rem Mantiene al dia la "unificacion" (este repo, origin) fusionando las novedades
-rem de los dos repos de los que venimos:
-rem   bertogim/main   el fork con los arreglos de OpenCode (de donde salimos)
-rem   upstream/main   el original de cramt (lo que sigue Bertogim)
-rem Si hay conflicto, para y avisa. Para volver atras:  git reset --hard pre-update
+rem Menu de mantenimiento del repo.
+rem
+rem La logica vive en scripts\update-upstream.ps1 y scripts\review-bertogim.ps1:
+rem en batch los errores de git son ilegibles y no se puede comprobar nada paso a
+rem paso. La regla es que main no se mueve hasta que la actualizacion esta
+rem validada en una rama temporal (check-ours + pnpm test).
+rem
+rem   1  trae cramt (upstream) y valida; main solo avanza si todo esta verde
+rem   2  prueba Bertogim en una rama aparte; main nunca se toca
+rem   3  solo enseña que hay nuevo
+rem
+rem Tambien vale pasarlo como argumento:  update-m365.cmd 1
 
 cd /d "%~dp0"
 
-echo === Buscando novedades ===
-git fetch --all --quiet
-if errorlevel 1 (
-  echo No se pudo conectar. Revisa la red o los remotos con:  git remote -v
-  exit /b 1
-)
+set "OPCION=%~1"
+if defined OPCION goto ejecutar
 
 echo.
-echo --- bertogim/main ---
-git log --oneline main..bertogim/main
-echo --- upstream/main ---
+echo   Mantenimiento de M365CopilotOpencodePlus
+echo.
+echo   1 - Actualizar desde cramt (upstream)   valida en rama temporal
+echo   2 - Revisar Bertogim                    rama aparte, no toca main
+echo   3 - Ver que hay nuevo                   solo lectura
+echo   4 - Salir
+echo.
+set /p "OPCION=Opcion [1-4]: "
+if not defined OPCION exit /b 2
+goto ejecutar
+
+:ejecutar
+if "%OPCION%"=="1" goto upstream
+if "%OPCION%"=="2" goto bertogim
+if "%OPCION%"=="3" goto estado
+if "%OPCION%"=="4" exit /b 0
+echo.
+echo Opcion no valida: "%OPCION%"
+exit /b 2
+
+:upstream
+call :lanzar "scripts\update-upstream.ps1"
+goto fin
+
+:bertogim
+call :lanzar "scripts\review-bertogim.ps1"
+goto fin
+
+:estado
+echo.
+echo === Trayendo referencias (solo lectura) ===
+git fetch --all --prune --quiet
+echo.
+echo --- upstream/main (cramt) ---
 git log --oneline main..upstream/main
-
-for /f %%c in ('git rev-list --count main..bertogim/main main..upstream/main') do set NEW=%%c
-if "%NEW%"=="0" (
-  echo.
-  echo Nada nuevo ni en el fork ni en el original. No hay nada que fusionar.
-  exit /b 0
-)
-
-git tag -f pre-update >nul
-
 echo.
-echo === Fusionando bertogim/main ===
-git merge --no-edit bertogim/main
-if errorlevel 1 goto conflicto
-
+echo --- bertogim/main (fork de OpenCode) ---
+git log --oneline main..bertogim/main
 echo.
-echo === Fusionando upstream/main ===
-git merge --no-edit upstream/main
-if errorlevel 1 goto conflicto
-
-echo.
-echo === Comprobando que nuestros parches siguen ahi ===
-node scripts\check-ours.mjs
-if errorlevel 1 goto deltas
-
-echo.
-echo === Reinstalando, compilando y probando ===
-call pnpm.cmd install
-if errorlevel 1 exit /b 1
-call pnpm.cmd build
-if errorlevel 1 exit /b 1
-call pnpm.cmd test
-if errorlevel 1 exit /b 1
-
-echo.
-echo === Subiendo a origin (tu repo) ===
-git push origin main
-if errorlevel 1 echo AVISO: el merge esta hecho pero el push fallo. Cuando puedas:  git push origin main
-
-echo.
-echo Listo. Reinicia el proxy (start-m365.cmd) para usar la version nueva.
+echo (Si no sale nada debajo de cada cabecera, no hay novedades.)
+if not defined M365_NO_PAUSE pause
 exit /b 0
 
-:conflicto
-echo.
-echo CONFLICTO. Los choques suelen estar en:
-echo   packages\proxy-lib\src\handler.ts
-echo   packages\core\src\tools.ts
-echo   packages\core\src\fenced.ts
-echo Conserva la logica de OpenCode del fork y luego:
-echo   pnpm.cmd install ^&^& pnpm.cmd build ^&^& pnpm.cmd test
-echo Para descartar el merge:      git merge --abort
-echo Para volver atras del todo:  git reset --hard pre-update
-exit /b 1
+:lanzar
+rem pnpm.cmd y no pnpm.ps1: la ExecutionPolicy bloquea el segundo.
+set "SCRIPT=%~1"
+set "PS=powershell"
+where pwsh >nul 2>nul
+if not errorlevel 1 set "PS=pwsh"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%"
+exit /b %errorlevel%
 
-:deltas
+:fin
+if errorlevel 1 (
+  echo.
+  echo No se ha aplicado nada: main sigue como estaba. Lee los mensajes de arriba.
+  if not defined M365_NO_PAUSE pause
+  exit /b 1
+)
 echo.
-echo Un merge ha dejado fuera alguno de nuestros parches (lista de arriba).
-echo Para volver atras:  git reset --hard pre-update
-exit /b 1
+echo Hecho.
+if not defined M365_NO_PAUSE pause
+exit /b 0
