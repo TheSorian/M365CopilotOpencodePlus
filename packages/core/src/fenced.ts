@@ -278,6 +278,14 @@ function renderFencedTemplate(spec: FencedToolSpec): string {
   return `${header}\n\`\`\`${spec.name}\n${lines.join("\n")}\n\`\`\``;
 }
 
+/** Just the `<tools>` schemas + harness notes, with no framing variant's prose.
+ *  A nudge that re-exposes tools to a model which already has the transcript
+ *  must not repeat text like "you have NOT run any command yet" (false mid-task,
+ *  and live it made the model distrust the whole prompt). */
+export function formatToolSchemas(tools: ToolDef[]): string {
+  return toolsBlock(tools);
+}
+
 /** The fenced equivalent of formatToolDefinitions' <tools> block.
  *
  * The behavioural framing around the <tools> block is the live, no-reprovision

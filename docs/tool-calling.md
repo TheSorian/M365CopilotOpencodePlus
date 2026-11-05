@@ -103,6 +103,10 @@ prompt is tuned. The layers, in handler order:
   tool call and give-up prose ("can't access the files", "commands return no output", "the
   file appears empty", "paste the files"), the proxy re-prompts forcefully **in the same
   conversation** to force a real first action. `M365_NO_CONFAB_RETRY` / `M365_CONFAB_RETRIES`.
+  The retry (and the "Please continue." nudge) re-sends the `<tools>` schemas and harness notes
+  via `formatToolSchemas` so the model doesn't refuse with "no `<tools>` block in this turn"
+  (gpt-6.1-sol), without repeating framing-variant text ("you have not run any command yet")
+  that contradicts a mid-task transcript.
   When every retry still refuses, the refusal is served as the turn's text (HTTP 200); set
   `M365_FAIL_CLOSED_CONFAB=1` to return **502** `tool_access_confabulation` instead, so a
   harness sees a failure it can retry or reroute instead of a give-up it takes as the answer.

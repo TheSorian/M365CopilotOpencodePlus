@@ -37,6 +37,9 @@ import {
   textAfterFirstToolCall,
   longHeredocAsWrite,
   formatToolResponse,
+  formatToolSchemas,
+  formatToolChoiceInstruction,
+  shapeToolsForRequest,
   isProseDocument,
   getMessageContent,
   noteRequestOutcome,
@@ -667,6 +670,24 @@ export async function handleChatCompletion(
   let framingVariant = currentFramingVariant(defaultFramingForModel(model));
   let useToolAgent = requestUsesAgent(model, !!hasTools);
 
+  // A bare nudge ("Please continue.", a forcing retry) carries no <tools> block,
+  // and the model is then right to answer that it cannot act without one —
+  // gpt-6.1-sol did exactly that, live: "en este mensaje ya no hay ningún
+  // <tools>". Re-send the <tools> block and notes + the SAME tool set with just
+  // the instruction (without repeating framing-variant prose like "you have not
+  // run any command yet"); M365 keeps the history server-side, so the delta
+  // stays one message. Ported from Bertogim 2b5e14c (his F99).
+  function toolNudge(instruction: string): string {
+    const shaped = shapeToolsForRequest(body.messages, body.tools);
+    if (!shaped || shaped.length === 0 || body.tool_choice === "none") {
+      return `<user>\n${instruction}\n</user>`;
+    }
+    const style = transcriptStyleForVariant(framingVariant);
+    const schemas = `${formatToolSchemas(shaped)}${formatToolChoiceInstruction(body.tool_choice)}`;
+    const framing = style.framingTag ? `<${style.framingTag}>\n${schemas}\n</${style.framingTag}>` : schemas;
+    return `${framing}\n\n<user>\n${instruction}\n</user>`;
+  }
+
   // Format message: full prompt on first turn, delta on follow-ups.
   // M365 is stateful — it remembers everything from prior turns,
   // so we only need to send new messages after the first turn.
@@ -696,8 +717,9 @@ export async function handleChatCompletion(
       }
       log.info(`Chat completion: model=${model}, stream=${body.stream}, messages=${body.messages.length}, new=${newMessages.length}, turn=${session.turnCount}, mode=delta, cid=${convId}`);
     } else {
-      // No meaningful new content to send — nudge M365 to continue.
-      text = "Please continue.";
+      // No meaningful new content to send — nudge M365 to continue, with the
+      // tool block when this is a tool request.
+      text = hasTools ? toolNudge("Please continue.") : "Please continue.";
       log.info(`Chat completion: model=${model}, stream=${body.stream}, messages=${body.messages.length}, turn=${session.turnCount}, mode=retry, cid=${convId}`);
     }
   }
@@ -1090,6 +1112,10 @@ export async function handleChatCompletion(
       text = remoteArtifact ? REMOTE_ARTIFACT_FORCE_PROMPT
         : confab ? (everActed ? MIDTASK_FORCE_PROMPT : CONFAB_FORCE_PROMPT)
         : HALLUCINATION_FORCE_PROMPT;
+      // Without a <tools> block the model is right to refuse ("in this turn
+      // there is no <tools>"), so the nudge re-exposes the framing and schemas
+      // along with the instruction.
+      text = toolNudge(text);
       const retry = await runBuffered();
       if ("error" in retry) return { kind: "error", resp: retry.error };
       conv.sentMessageCount = body.messages.length;

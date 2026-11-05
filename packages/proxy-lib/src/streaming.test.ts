@@ -727,6 +727,9 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     ];
     const m = await ask([{ role: "user", content: `pdf ${Math.random()}` }], new SessionPool());
     expect(scripted.texts).toHaveLength(2); // the forcing retry ran
+    // The retry must carry the tool block too: without it the model is right to
+    // answer "there is no <tools> in this turn" (gpt-6.1-sol, live).
+    expect(scripted.texts[1]).toContain("<tools>");
     expect(m.tool_calls?.[0] && JSON.parse(m.tool_calls[0].function.arguments).command).toBe("ls -la");
     scripted.queue = [];
   });
@@ -751,6 +754,7 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     expect(scripted.texts).toHaveLength(3);
     expect(scripted.texts[2]).toContain("Your tools are working");
     expect(scripted.texts[2]).not.toContain("you have not run any command yet");
+    expect(scripted.texts[2]).toContain("<tools>");
     expect(JSON.parse(m2.tool_calls[0].function.arguments).command).toBe("py -m pip install fpdf2");
     scripted.queue = [];
   });

@@ -255,6 +255,15 @@ export function trimOpenCodeTools(tools: ToolDef[]): ToolDef[] {
   return kept.length > 0 ? kept : tools;
 }
 
+/** The toolset a request actually offers: the caller's list, adapted for
+ *  OpenCode when the request comes from that harness. Exported so a rebuilt
+ *  message (a "continue"/forcing nudge carries no transcript of its own) sends
+ *  the SAME set the original turn did, not the untrimmed one. */
+export function shapeToolsForRequest(messages: Message[], tools?: ToolDef[]): ToolDef[] | undefined {
+  const openCode = process.env.M365_OPENCODE_TRIM !== "0" && isOpenCodeHarness(messages);
+  return openCode && tools ? trimOpenCodeTools(tools) : tools;
+}
+
 export function formatMessages(
   messages: Message[],
   tools?: ToolDef[],
@@ -264,10 +273,7 @@ export function formatMessages(
 ): string {
   const parts: string[] = [];
 
-  // Adapt the toolset the harness offers. `M365_OPENCODE_TRIM=0` opts out.
-  // The system messages are left exactly as the harness wrote them.
-  const openCode = process.env.M365_OPENCODE_TRIM !== "0" && isOpenCodeHarness(messages);
-  const shapedTools = openCode && tools ? trimOpenCodeTools(tools) : tools;
+  const shapedTools = shapeToolsForRequest(messages, tools);
 
   if (conversationId) {
     parts.push(`<conversation_id>${conversationId}</conversation_id>`);
