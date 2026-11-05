@@ -544,7 +544,17 @@ type FramingBuilder = (tools: ToolDef[]) => string;
 /** Names of the editing tools harnesses ship. `apply_patch` is what current
  *  OpenCode offers; `patch` is the older/other spelling. */
 const PATCH_TOOL_NAME = /^(apply_patch|patch|apply_diff)$/i;
-const QUESTION_TOOL_NAME = /^(question|ask_user|ask)$/i;
+/** The harness tool that asks the user a question. Shared with `formatToolResponse`,
+ *  which re-sends the contract next to a rejected `question` call. */
+export const QUESTION_TOOL_NAME = /^(question|ask_user|ask)$/i;
+
+/** The `question` contract, in the model's own voice. Emitted next to the tool
+ *  schema AND after a rejected call (see `formatToolResponse`): a model that just
+ *  wrote a string where `questions` must be an array repeats the same mistake if
+ *  the only copy of the contract is far away in the system prompt. */
+export function questionContractNote(toolName: string): string {
+  return `When a decision from me is needed, use \`${toolName}\`: pass \`questions\` as an ARRAY of objects with \`question\`, \`header\` (30 characters at most), \`options\` (each \`label\` + \`description\`) and optionally \`multiple\`. Wait for the real result before continuing — a dismissed question is not a yes.`;
+}
 
 /** Notes that ride next to the tool schemas in EVERY framing variant.
  *
@@ -578,9 +588,7 @@ function harnessNotes(tools: ToolDef[]): string {
   }
 
   if (question) {
-    notes.push(
-      `When a decision from me is needed, use \`${question.function.name}\`: pass \`questions\` as an ARRAY of objects with \`question\`, \`header\` (30 characters at most), \`options\` (each \`label\` + \`description\`) and optionally \`multiple\`. Wait for the real result before continuing — a dismissed question is not a yes.`,
-    );
+    notes.push(questionContractNote(question.function.name));
   }
 
   if (notes.length === 0) return "";

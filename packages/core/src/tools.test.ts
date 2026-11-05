@@ -477,6 +477,38 @@ describe("tool-result labelling", () => {
     );
     expect(out).toContain('<tool_response tool="tool">');
   });
+
+  // A rejected `question` call comes back as a tool result. The contract is far
+  // away in the system prompt, so the retry repeats the same mistake (a string
+  // where `questions` must be an array) unless it arrives next to the error.
+  it("re-sends the question contract after a rejected question call", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const out = formatToolResponse(
+      {
+        role: "tool",
+        name: "question",
+        tool_call_id: "q1",
+        content: 'Invalid arguments for tool "question": - questions: Expected array, received string',
+      },
+      [],
+    );
+    expect(out).toContain("Invalid arguments for tool");
+    expect(out).toContain("pass `questions` as an ARRAY of objects");
+  });
+
+  it("leaves a normal question result and another tool's error alone", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const answered = formatToolResponse(
+      { role: "tool", name: "question", tool_call_id: "q2", content: 'User answered: "A"' },
+      [],
+    );
+    expect(answered).not.toContain("pass `questions` as an ARRAY of objects");
+    const bash = formatToolResponse(
+      { role: "tool", name: "bash", tool_call_id: "b1", content: "Invalid arguments for tool \"bash\"" },
+      [],
+    );
+    expect(bash).not.toContain("pass `questions` as an ARRAY of objects");
+  });
 });
 
 describe("fenced tool format (the only format)", () => {
