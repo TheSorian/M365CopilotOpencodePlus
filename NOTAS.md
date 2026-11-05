@@ -58,48 +58,81 @@ Para desactivar el recorte del todo: `set M365_OPENCODE_TRIM=0`.
 ## Actualizar (viene de dos sitios)
 
 Este repo es la unificación de dos: el fork de Bertogim (los arreglos para OpenCode) y el
-original de cramt (el protocolo). `update-m365.cmd` fusiona los dos, en ese orden, y
-después reinstala, compila, pasa los tests y sube el resultado a `origin`:
+original de cramt (el protocolo). Cada uno entra por su puerta, y **`main` no se fusiona
+nunca a ciegas**: primero se prueba en una rama temporal y solo avanza si sale verde.
 
     update-m365.cmd
 
-Si hay conflicto, para y dice dónde mirar:
+Abre un menú:
 
-    git merge --abort              descartar el merge
-    git reset --hard pre-update    volver a como estaba antes de fusionar
+    1 - Actualizar desde cramt (upstream)   valida en rama temporal; main solo si está verde
+    2 - Revisar Bertogim                    rama aparte; main no se toca
+    3 - Ver que hay nuevo                   solo lectura
+    4 - Salir
+
+También vale como argumento: `update-m365.cmd 1`. La lógica vive en
+`scripts\update-upstream.ps1` y `scripts\review-bertogim.ps1` (PowerShell y no batch: así se
+comprueba el código de salida de git y de pnpm paso a paso, y se puede probar).
+
+### 1. Actualizar desde cramt
+
+`update-upstream.ps1` hace:
+
+    árbol limpio -> main al día -> rama update-upstream-AAAA-MM-DD
+    -> merge upstream/main -> check-ours -> pnpm install -> pnpm test
+    -> verde: merge --ff-only a main, push, y se borra la rama
+    -> rojo:  se aborta el merge, se borra la rama, y main no se ha movido
+
+Si hay cambios sin commitear no empieza: o los guardas (`git add -A; git commit`) o los
+apartas (`git stash -u`). Si el merge trae conflicto, para, lista los ficheros y se limpia
+solo; los choques suelen ser `handler.ts`, `tools.ts` y `fenced.ts`, y la regla es conservar
+tu lado (OpenCode + patrones en castellano).
+
+Opciones útiles:
+
+    .\scripts\update-upstream.ps1 -NoPush        todo en local, sin subir
+    .\scripts\update-upstream.ps1 -KeepBranch    si falla, deja la rama para mirarla
+
+No crea tags: los hitos se etiquetan a mano, uno por versión buena:
+
+    git tag stable-2026-11-20 && git push origin stable-2026-11-20
+
+### 2. Revisar Bertogim
+
+`review-bertogim.ps1` fusiona `bertogim/main` en `review-bertogim-AAAA-MM-DD`, pasa
+`check-ours` y la suite, y **nunca toca `main`**. Si sale verde deja la rama y te dice cómo
+adoptarla; si sale roja (o hay conflicto) la borra y no se ha traído nada. `-Keep` la
+conserva para mirar el fallo.
+
+Es la puerta correcta para Bertogim: el 2026-11-05 su `main` llevaba 12 commits por delante
+con la suite en rojo (reescritura del system prompt en `packages/prompts/`, sin bloque
+`<tools>`), así que fusionarlo a mano solo mete fallos.
 
 Los remotos:
 
     origin      tu repo (TheSorian/M365CopilotOpencodePlus) — aquí se sube
     bertogim    el fork del que salimos (arreglos de OpenCode)
     upstream    el original de cramt (lo que sigue Bertogim)
+    local       tu clon de cramt en G:\local-AI\m365-copilot-proxy (si existe)
 
 De `origin` no se trae nada: es solo destino. Las novedades entran por `bertogim` y
 `upstream`, y como `origin` es el remoto por defecto, `git push` a secas ya sube a tu repo.
 
-**Antes de fusionar `bertogim`, mira cómo está:** el 2026-11-01 su `main` (0682242) trae 18
-tests en rojo — está a mitad de un cambio grande (el proxy pasa a escribir su propio system
-prompt en `packages/prompts/`, sin bloque `<tools>`). Fusionarlo ahora importaría esos fallos
-y cambiaría de golpe cómo se le pide actuar al modelo. Compruébalo en un clon aparte antes:
-
-    git -C <clon-de-bertogim> fetch && git checkout bertogim/main
-    pnpm install && pnpm build && pnpm test
-
-Mientras siga en rojo, `upstream` (cramt) sí se puede fusionar solo: es la línea del protocolo
-y va por detrás.
-
 ## Por que no se pierden nuestros cambios
 
-- `NOTAS.md`, `start-m365.cmd` y `update-m365.cmd` no existen en ninguno de los dos repos
-  de origen: un merge no puede borrarlos.
+- `NOTAS.md`, `start-m365.cmd`, `update-m365.cmd` y `scripts\update-upstream.ps1` /
+  `scripts\review-bertogim.ps1` no existen en ninguno de los dos repos de origen: un merge no
+  puede borrarlos.
 - En los ficheros compartidos (`handler.ts`, `tools.ts`, `fenced.ts`...) git fusiona línea a
   línea: o aplica las dos cosas, o para con un conflicto. Nunca descarta en silencio un
   trozo que solo hemos tocado nosotros.
 - Todo queda en la historia: el commit de merge lleva el anterior como padre, y además se
-  sube a `origin`. Deshacer es `git reset --hard pre-update`.
+  sube a `origin`. Deshacer una actualización es borrar la rama temporal (lo hace el script
+  solo) o, si ya se subió, `git revert -m 1 <commit-de-merge>`.
 - Lo que sí puede pasar es que un merge aplique limpio y deje un parche muerto (una función
   renombrada, una rama que ya no se usa). Para eso está `scripts/check-ours.mjs`:
-  `update-m365.cmd` lo ejecuta tras fusionar y para si falta alguno. A mano:
+  `update-upstream.ps1` lo ejecuta dentro de la rama temporal y no promociona si falta
+  alguno. A mano:
 
       node scripts\check-ours.mjs
 
