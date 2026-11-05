@@ -103,6 +103,16 @@ prompt is tuned. The layers, in handler order:
   tool call and give-up prose ("can't access the files", "commands return no output", "the
   file appears empty", "paste the files"), the proxy re-prompts forcefully **in the same
   conversation** to force a real first action. `M365_NO_CONFAB_RETRY` / `M365_CONFAB_RETRIES`.
+  When every retry still refuses, the refusal is served as the turn's text (HTTP 200); set
+  `M365_FAIL_CLOSED_CONFAB=1` to return **502** `tool_access_confabulation` instead, so a
+  harness sees a failure it can retry or reroute instead of a give-up it takes as the answer.
+  Off by default: the trigger is a pattern list, and a false positive would turn a legitimate
+  "send me the path first" into an error.
+- **Rejected `question` call** (`formatToolResponse`): a harness reports bad tool arguments as
+  the tool result, and models get `question` wrong the same way every time — a string where
+  `questions` must be an array. The contract is re-sent right after that `<tool_response>`
+  (the schema itself is far away in the system prompt), so the retry sees the error and the
+  shape together.
 - **Hallucinated-completion retry** (`looksLikeHallucinatedCompletion`): if the model CLAIMS
   a file mutation ("I've replaced the README") with **no tool call all conversation**, force a
   real write. Gated on "never acted," so it won't misfire on a genuine post-write summary.

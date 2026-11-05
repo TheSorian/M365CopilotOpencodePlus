@@ -1099,6 +1099,30 @@ export async function handleChatCompletion(
       log.info(`After forcing retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
     }
 
+    // Opt-in fail-closed (#66): when every forcing retry still answers "I can't
+    // access the files/tools" without calling one, a harness sees a normal 200
+    // and treats the refusal as the turn's answer. Live, that is the give-up
+    // that ends a pi run. Off by default: the trigger is a pattern list, and a
+    // false positive would turn a legitimate "I need the path first" into an
+    // error — M365_FAIL_CLOSED_CONFAB=1 turns it on. Streaming is safe: liveDelta
+    // already held such a draft back, so nothing has been sent to the client.
+    if (
+      process.env.M365_FAIL_CLOSED_CONFAB === "1" &&
+      !parsed.hasToolCalls &&
+      looksLikeConfabulation(judged)
+    ) {
+      log.info("Tool-access confabulation persisted after forcing retries — failing closed");
+      return {
+        kind: "error",
+        resp: jsonResponse(502, {
+          error: {
+            message: "M365 kept claiming it could not access the workspace or tools after the proxy re-sent the tool instructions. Retry the turn, switch model, or send RESTORECONTEXT to replay the conversation.",
+            type: "tool_access_confabulation",
+          },
+        }),
+      };
+    }
+
     // Never pass a remote M365 artifact off as a successful local edit. A retry
     // may merely transform a Teams URL into `sandbox:/mnt/data/...`; once the
     // configured attempts are exhausted, fail explicitly so the harness/user can

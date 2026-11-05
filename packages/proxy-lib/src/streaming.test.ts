@@ -755,6 +755,33 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     scripted.queue = [];
   });
 
+  it("fails closed on a persistent tool-access refusal only when opted in", async () => {
+    const refusal = { fullText: "I can't access the files in your workspace, so please paste the contents here." };
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [refusal, refusal];
+    process.env.M365_FAIL_CLOSED_CONFAB = "1";
+    try {
+      const res = await handleChatCompletion(ChatCompletionRequest.parse({
+        model: "gpt-5.6-think-deeper", stream: false, tools,
+        messages: [{ role: "user", content: `files ${Math.random()}` }],
+      }), new SessionPool());
+      expect(res.status).toBe(502);
+      const body = await res.json();
+      expect(body.error.type).toBe("tool_access_confabulation");
+      expect(scripted.texts).toHaveLength(2); // the forcing retry did run
+    } finally {
+      delete process.env.M365_FAIL_CLOSED_CONFAB;
+    }
+    // Off by default the same refusal is served as the turn's text — a false
+    // positive must not turn a legitimate answer into a client-side error.
+    scripted.texts = [];
+    scripted.queue = [refusal, refusal];
+    const m = await ask([{ role: "user", content: `files ${Math.random()}` }], new SessionPool());
+    expect(m.content).toContain("can't access");
+    scripted.queue = [];
+  });
+
   it("leaves a real document alone even if its body sounds like a give-up", async () => {
     scripted.result = null;
     scripted.texts = [];

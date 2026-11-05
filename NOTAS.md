@@ -32,6 +32,7 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_AVOID_THROTTLING=1              frena antes de agotar el cupo
     set M365_OPENCODE_TOOLS=...              allowlist propia: 10 tools, con skill y execute
     set M365_IMAGE_DIR=%USERPROFILE%\Pictures\m365   imágenes generadas (por defecto ~/Pictures)
+    set M365_FAIL_CLOSED_CONFAB=1            502 si la negativa persiste (opt-in; por defecto 200)
 
 Lo del UA/locale/zona no es cosmético: el login abre un Chromium visible y, con los
 valores por defecto, la huella dice "Linux, en-GB, Copenhague" mientras el navegador
@@ -44,6 +45,14 @@ Se caen las cinco `openchamber_*` y `subagent`.
 Medido en el request real: 46.578 chars de prompt (allowlist del fork con 8 = 45.324;
 sin recorte con 16 = 51.516).
 Para desactivar el recorte del todo: `set M365_OPENCODE_TRIM=0`.
+
+`M365_FAIL_CLOSED_CONFAB=1` no cambia lo que hace el proxy, solo qué devuelve cuando,
+agotados los reintentos, el modelo sigue contestando "no puedo acceder a los archivos"
+sin llamar a ninguna tool. Sin la variable eso llega como texto normal (HTTP 200) y el
+agente lo da por respuesta final; con ella llega como error 502 `tool_access_confabulation`
+y el harness puede reintentar o cambiar de modelo. Va apagado a propósito: el disparador
+es una lista de patrones y un falso positivo convertiría una respuesta legítima
+("pásame la ruta primero") en error.
 
 ## Cuando algo va mal, en este orden
 
