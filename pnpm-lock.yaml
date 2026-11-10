@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@rolldown/binding-linux-arm64-gnu':
+        specifier: 1.0.0-rc.11
+        version: 1.0.0-rc.11
       tsdown:
         specifier: ^0.21.5
         version: 0.21.5(typescript@6.0.2)
@@ -692,7 +695,6 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@rolldown/binding-linux-arm64-gnu@1.0.0-rc.12':
     resolution: {integrity: sha512-/I5AS4cIroLpslsmzXfwbe5OmWvSsrFuEw3mwvbQ1kDxJ822hFHIx+vsN/TAzNVyepI/j/GSzrtCIwQPeKCLIg==}
@@ -3152,8 +3154,7 @@ snapshots:
   '@rolldown/binding-linux-arm-gnueabihf@1.0.0-rc.12':
     optional: true
 
-  '@rolldown/binding-linux-arm64-gnu@1.0.0-rc.11':
-    optional: true
+  '@rolldown/binding-linux-arm64-gnu@1.0.0-rc.11': {}
 
   '@rolldown/binding-linux-arm64-gnu@1.0.0-rc.12':
     optional: true
