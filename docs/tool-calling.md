@@ -116,6 +116,17 @@ prompt is tuned. The layers, in handler order:
   the tool result, and models get `question` wrong the same way every time — a string where
   `questions` must be an array. The contract is re-sent right after that `<tool_response>`
   (the schema itself is far away in the system prompt), so the retry sees the error and the
+- **No-op shell call retry** (`isOnlyNoopShellCall`): a single call whose whole command
+  sequence is only `echo`/`true`/`false` is narration, not work — M365 then keeps ticking
+  turns with commands that do nothing. One retry asks for either the final text or a
+  substantive call. (Ported from Bertogim d300c24.)
+- **Periodic tool reminder** (`periodicToolReminderDue`): on continuations, a one-line
+  "reply with one tool block" reminder every 10th proxy call keeps tool use the default
+  without paying a line every turn. (Bertogim d300c24 + f98691f.)
+- **Patch note after failure** (`hasFailedPatchResult` + `PATCH_NOTE`): right after a failed
+  `patch` tool result, the strict `*** Begin Patch` shape is re-sent (then every 10th call
+  while failures persist) so the model stops retrying heredoc/`sed -i` variants on stale
+  context. (Bertogim d300c24.)
   shape together.
 - **Hallucinated-completion retry** (`looksLikeHallucinatedCompletion`): if the model CLAIMS
   a file mutation ("I've replaced the README") with **no tool call all conversation**, force a

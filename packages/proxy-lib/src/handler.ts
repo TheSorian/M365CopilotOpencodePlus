@@ -26,6 +26,7 @@ import {
   secondsUntilReset,
   type PriorityAccessExhaustion,
   formatMessages as formatCoreMessages,
+  type ParsedToolCall,
   imageUrls,
   parseToolCalls,
   buildSpecMap,
@@ -258,6 +259,44 @@ const HALLUCINATION_FORCE_PROMPT =
 const REMOTE_ARTIFACT_FORCE_PROMPT =
   "The patch or download link you produced exists only in M365's remote environment and is NOT a file in the caller's working directory. Do NOT create, download, or apply a patch, and do NOT use a Teams artifact link. Use the provided local edit/write tool directly; if needed, emit ONE ```bash block that modifies the named local file in place. Output only that single local tool call, nothing else.";
 
+// The model closed a (sub)step with a no-op command instead of a final answer.
+// The call runs fine, poisons the round trip and M365 happily keeps ticking
+// turns with `echo done`. Ported from Bertogim d300c24 (his noop-shell nudge).
+const NOOP_SHELL_FORCE_PROMPT =
+  "That block only ran `echo`, `true` or `false`, which doesn't move the task. A command isn't how you narrate progress or close the turn.\n\nIf the work is done, give me the summary as plain text with no fenced block. Otherwise send the command or patch that performs or verifies the next real step.";
+
+// Continuations send only the new messages (M365 keeps the framing and the
+// tools server-side; a retry re-sends ours), so the model loses the "act with a
+// block" pressure exactly when it matters — that was the live gpt-6.1-sol
+// give-up. A one-line reminder every 10th proxy call keeps tool use the default
+// without paying a line every turn. Ported from Bertogim d300c24 + f98691f
+// (his every-10 cadence).
+const PERIODIC_TOOL_REMINDER =
+  "Reminder: when you need to act, reply with exactly one fenced tool block, and I will execute it myself in the terminal. When the task is complete, reply with the final summary as plain text, without a tool block.";
+
+// After a failed patch, the model keeps retrying `sed -i` / heredoc variants on
+// stale context and burns turns. Re-sending the strict patch shape right after
+// the failure (then every 10th call while failures persist) fixes the format
+// early. Ported from Bertogim d300c24.
+const PATCH_NOTE = [
+  "# Patch tool",
+  "",
+  "The patch failed. Send a corrected `patch` block using the required patch format:",
+  "",
+  "```patch",
+  "*** Begin Patch",
+  "*** Update File: path/to/file",
+  "@@",
+  " existing context",
+  "-old content",
+  "+new content",
+  "*** End Patch",
+  "```",
+  "",
+  "Use paths and context confirmed from the real files. Start with `*** Begin Patch`, finish with `*** End Patch`, and do not use `---` or `+++` Git diff headers. If the file contents may have changed, inspect the file again with one tool block before retrying.",
+].join("\n");
+
+
 // M365 soft-caps output around ~3k tokens (~12k chars) and — critically —
 // CONCLUDES EARLY rather than truncating mid-stream, so a too-long answer comes
 // back clean-looking but incomplete with no error to detect (docs/hypotheses.md
@@ -377,6 +416,8 @@ interface ConversationState {
   /** Sent ahead of the next tool result when the proxy executed less than the
    *  model wrote last turn (see executedOnlyFirstNote). */
   pendingNote: string | null;
+  /** Proxy-call ordinal of the previous failed patch (patch-note cadence). */
+  lastPatchFailureCall: number | null;
   /** The model that last answered in this conversation. A different one (the
    *  Opus fallback, #18) can't continue the M365 conversation — it may need
    *  another scenario — so it starts a fresh one with the full history. */
@@ -458,6 +499,7 @@ export class SessionPool {
         existing.sentMessageCount = 0;
         existing.sentMessageSnapshot = undefined;
         existing.pendingNote = null;
+        existing.lastPatchFailureCall = null;
       }
       existing.lastAccessedAt = Date.now();
       return existing;
@@ -469,6 +511,7 @@ export class SessionPool {
       session: new ModelSession(this.sessionOptions),
       sentMessageCount: 0,
       pendingNote: null,
+      lastPatchFailureCall: null,
       lastAccessedAt: Date.now(),
     };
     this.conversations.set(fingerprint, state);
@@ -542,6 +585,67 @@ function parseReply(text: string, tools: Parameters<typeof parseToolCalls>[1]): 
   return { parsed, judged: parsed.textContent };
 }
 
+// --- Reminder cadence (ported from Bertogim d300c24 + f98691f) ---
+
+const PATCH_TOOL_NAME = /^(patch|apply_patch|apply_diff)$/i;
+const PATCH_FAILURE = /\b(?:failed|failure|error|invalid|rejected|could not|cannot|unable|does not apply|did not apply|invalid context|context mismatch)\b/i;
+const SHELL_TOOL_NAME = /^(?:bash|shell|sh|zsh|run|exec|execute|command|cmd|terminal|run_command|run_terminal_cmd|execute_command|execute_bash|shell_exec|system)$/i;
+
+function toolCallForResult(message: ParsedMessage, history: ParsedMessage[]) {
+  if (!message.tool_call_id) return undefined;
+  for (const candidate of history) {
+    const call = candidate.role === "assistant"
+      ? candidate.tool_calls?.find(item => item.id === message.tool_call_id)
+      : undefined;
+    if (call) return call;
+  }
+  return undefined;
+}
+
+function hasFailedPatchResult(messages: ParsedMessage[], history: ParsedMessage[]): boolean {
+  return messages.some(message => {
+    if (message.role !== "tool") return false;
+    const call = toolCallForResult(message, history);
+    const name = message.name || call?.function.name || "";
+    return PATCH_TOOL_NAME.test(name) && PATCH_FAILURE.test(getMessageContent(message));
+  });
+}
+
+/** Proxy-call ordinal: 1 + assistant turns so far, the same number across
+ *  retries of the same turn. */
+export function proxyCallOrdinal(messages: ParsedMessage[]): number {
+  return 1 + messages.filter(message => message.role === "assistant").length;
+}
+
+export function patchReminderDue(lastFailureCall: number | null, currentCall: number): boolean {
+  return lastFailureCall === null || currentCall - lastFailureCall >= 10;
+}
+
+export function periodicToolReminderDue(currentCall: number): boolean {
+  return currentCall > 0 && currentCall % 10 === 0;
+}
+
+/** A shell call whose whole command sequence is only `echo`, `true` or `false`:
+ *  narration, not work. Legit redirections (`echo x > file`) never match. */
+export function isOnlyNoopShellCall(call: ParsedToolCall): boolean {
+  if (!SHELL_TOOL_NAME.test(call.function.name)) return false;
+  let command = "";
+  try {
+    const args = JSON.parse(call.function.arguments || "{}");
+    command = String(args.command ?? args.cmd ?? args.script ?? "");
+  } catch {
+    return false;
+  }
+  const value = command.trim();
+  if (!value) return false;
+  const commands = value.split(/\s*(?:\r?\n|;|&&|\|\|)\s*/).filter(Boolean);
+  return commands.length > 0 && commands.every(command =>
+    /^(?:true|false)$/.test(command) ||
+    /^echo(?:\s+(?:"(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_.,:/@%+=-]+))*\s*$/.test(command),
+  );
+}
+
+// --- Delta message formatting ---
 // --- Delta message formatting ---
 
 /** Format the messages new since the last turn. `history` is the whole request:
@@ -710,6 +814,21 @@ export async function handleChatCompletion(
       // The upstream conversation retains its initial framing, tool schemas
       // and workflow preferences. Send only new messages on continuations.
       text = delta;
+      // Every 10th proxy call, quietly re-pin tool use as the default (see the
+      // PERIODIC_TOOL_REMINDER note). A tool request only: a chat continuation
+      // shouldn't be pushed back into acting.
+      const callOrdinal = proxyCallOrdinal(body.messages);
+      if (hasTools && periodicToolReminderDue(callOrdinal)) {
+        text = `${PERIODIC_TOOL_REMINDER}\n\n${text}`;
+        log.info(`Prepended periodic tool reminder on proxy call ${callOrdinal}`);
+      }
+      if (hasFailedPatchResult(newMessages, body.messages)) {
+        if (patchReminderDue(conv.lastPatchFailureCall, callOrdinal)) {
+          text = `${text}\n\n${PATCH_NOTE}`;
+          log.info(`Appended patch-format reminder on proxy call ${callOrdinal}`);
+        }
+        conv.lastPatchFailureCall = callOrdinal;
+      }
       // Only a tool result is the thing the note corrects the model about.
       if (conv.pendingNote && newMessages.some((m) => m.role === "tool")) {
         text = `${conv.pendingNote}\n\n${text}`;
@@ -1125,6 +1244,25 @@ export async function handleChatCompletion(
       log.info(`After forcing retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
     }
 
+    // A single no-op shell call (`echo done`, `true`) is narration, not work:
+    // it runs fine, poisons the round trip and invites M365 to keep ticking
+    // turns with commands that do nothing. Ask once whether the work is done
+    // (final text) or there is a real next step (a substantive tool call).
+    if (
+      parsed.hasToolCalls &&
+      parsed.toolCalls.length === 1 &&
+      isOnlyNoopShellCall(parsed.toolCalls[0])
+    ) {
+      log.info("Echo/true/false-only shell call detected; requesting a final text or a substantive action");
+      text = toolNudge(NOOP_SHELL_FORCE_PROMPT);
+      const retry = await runBuffered();
+      if ("error" in retry) return { kind: "error", resp: retry.error };
+      conv.sentMessageCount = body.messages.length;
+      conv.sentMessageSnapshot = body.messages.map(messageSnapshot);
+      fullText = stopAtFabricatedResult(retry.fullText);
+      ({ parsed, judged } = parseReply(fullText, body.tools));
+      log.info(`After no-op shell retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
+    }
     // Opt-in fail-closed (#66): when every forcing retry still answers "I can't
     // access the files/tools" without calling one, a harness sees a normal 200
     // and treats the refusal as the turn's answer. Live, that is the give-up

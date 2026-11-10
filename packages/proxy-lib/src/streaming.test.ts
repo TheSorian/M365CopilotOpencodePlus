@@ -100,7 +100,7 @@ vi.mock("@m365-copilot/core", async (importActual) => {
 /** Which fake ModelSession (by creation order) served every run() call, in order. */
 const servedBy: number[] = [];
 
-const { handleChatCompletion, SessionPool, ChatCompletionRequest } = await import("./index.js");
+const { handleChatCompletion, SessionPool, ChatCompletionRequest, periodicToolReminderDue, patchReminderDue, proxyCallOrdinal } = await import("./index.js");
 const { resetAgentRoutes, resetPriorityAccessState, TurnBudgetHold } = await import("@m365-copilot/core");
 
 // The proxy remembers a priority-access wall for the process (until the reset);
@@ -799,6 +799,97 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
   });
 });
 
+// Ported from Bertogim d300c24 + f98691f: the noop-shell retry, the periodic
+// tool reminder every 10th proxy call, and the patch note after failed patches.
+describe("noop shell calls, periodic reminders and patch notes", () => {
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+
+  const ask = async (messages: any[], pool: InstanceType<typeof SessionPool>) =>
+    (await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "gpt-5.6-think-deeper", stream: false, tools, messages }), pool)).json()).choices[0].message;
+
+  it("retries once when the only call narrates with echo/true/false", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: "```bash\necho \"Task complete\"\n```" },
+      { fullText: "All done: the file was created." },
+    ];
+    const m = await ask([{ role: "user", content: `noop ${Math.random()}` }], new SessionPool());
+    expect(scripted.texts).toHaveLength(2); // the noop retry ran
+    expect(scripted.texts[1]).toContain("only ran `echo`");
+    expect(scripted.texts[1]).toContain("<tools>"); // the nudge re-sends the schemas
+    expect(m.tool_calls).toBeUndefined(); // the retry answered in plain text
+    scripted.queue = [];
+  });
+
+  it("lets a real command through: echo inside a compound call is work", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: "```bash\nls -la || echo none\n```" },
+    ];
+    const m = await ask([{ role: "user", content: `real ${Math.random()}` }], new SessionPool());
+    expect(scripted.texts).toHaveLength(1); // no retry
+    expect(m.tool_calls?.[0]).toBeDefined();
+    scripted.queue = [];
+  });
+
+  it("prepends the periodic tool reminder every 10th proxy call", async () => {
+    expect(periodicToolReminderDue(10)).toBe(true);
+    expect(periodicToolReminderDue(9)).toBe(false);
+    expect(periodicToolReminderDue(1)).toBe(false);
+
+    // End to end: a delta turn whose history carries 9 assistant messages is
+    // proxy call 10. The reminder rides on the delta, before the new messages.
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: 
+      "ok" }];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `start ${Math.random()}` }];
+    await ask(messages, pool);
+    expect(scripted.texts[0]).not.toContain("Reminder:");
+    for (let i = 0; i < 9; i++) {
+      const call = { id: `c${i}`, type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "ls" }) } };
+      messages.push({ role: "assistant", content: null, tool_calls: [call] });
+      messages.push({ role: "tool", tool_call_id: `c${i}`, content: "file.txt" });
+    }
+    messages.push({ role: "user", content: `next ${Math.random()}` });
+    // proxyCallOrdinal counts assistant messages: 9 + the last call = 10.
+    expect(proxyCallOrdinal(messages)).toBe(10);
+    await ask(messages, pool);
+    expect(scripted.texts[scripted.texts.length - 1]).toContain("Reminder:");
+    expect(scripted.texts[scripted.texts.length - 1]).toContain("next"); // the new message too
+    scripted.queue = [];
+  });
+
+  it("appends the patch note after a failed patch result", async () => {
+    expect(patchReminderDue(null, 3)).toBe(true); // first failure: always
+    expect(patchReminderDue(3, 13)).toBe(true);   // every 10th call
+    expect(patchReminderDue(3, 12)).toBe(false);  // but not every turn
+
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "```patch\n*** Begin Patch\n*** End Patch\n```" }];
+    const pool = new SessionPool();
+    const patchTools = [{ type: "function", function: { name: "patch", parameters: { type: "object", properties: { path: { type: "string" } } } } }];
+    const messages: any[] = [{ role: "user", content: `patch ${Math.random()}` }];
+    const m1 = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-5.6-think-deeper", stream: false, tools: patchTools, messages,
+    }), pool);
+    const call = (await m1.json()).choices[0].message.tool_calls?.[0];
+    expect(call).toBeDefined();
+    messages.push({ role: "assistant", content: null, tool_calls: [call] });
+    messages.push({ role: "tool", tool_call_id: call.id, content: "error: the patch did not apply (context mismatch)" });
+    scripted.texts = [];
+    await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-5.6-think-deeper", stream: false, tools: patchTools, messages,
+    }), pool);
+    // The delta resend carries the strict patch shape right after the failure.
+    expect(scripted.texts.at(-1)).toContain("Begin Patch");
+    scripted.queue = [];
+  });
+});
 describe("a new harness session that shares the first user message", () => {
   const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
   const ask = async (messages: any[], pool: InstanceType<typeof SessionPool>) =>
