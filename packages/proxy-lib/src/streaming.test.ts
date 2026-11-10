@@ -889,6 +889,47 @@ describe("noop shell calls, periodic reminders and patch notes", () => {
     expect(scripted.texts.at(-1)).toContain("Begin Patch");
     scripted.queue = [];
   });
+
+  it("prepends a directed note when the same call repeats >= 3 times", async () => {
+    // The live loop: shell("git push origin <rama>") replayed verbatim; the
+    // harness re-sends assistant+toolresult each turn with the same arguments.
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "ok" }];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `push ${Math.random()}` }];
+    await ask(messages, pool);
+    scripted.texts = [];
+    for (let i = 0; i < 3; i++) {
+      const call = { id: `push${i}`, type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "git push origin <rama>" }) } };
+      messages.push({ role: "assistant", content: null, tool_calls: [call] });
+      messages.push({ role: "tool", tool_call_id: `push${i}`, content: 'ParserError: El operador "<" esta reservado.' });
+      scripted.queue = [{ fullText: "```bash\ngit push origin <rama>\n```" }];
+      await ask(messages, pool);
+    }
+    expect(scripted.texts.at(-1)).toContain("You have now sent this exact call 3 times");
+    expect(scripted.texts.at(-1)).toContain("<rama>"); // names the placeholder
+    scripted.queue = [];
+  });
+
+  it("stays quiet before the loop threshold", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "ok" }];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `loopless ${Math.random()}` }];
+    await ask(messages, pool);
+    scripted.texts = [];
+    for (let i = 0; i < 2; i++) {
+      const call = { id: `r${i}`, type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "git status" }) } };
+      messages.push({ role: "assistant", content: null, tool_calls: [call] });
+      messages.push({ role: "tool", tool_call_id: `r${i}`, content: "fatal: not a git repository" });
+      scripted.queue = [{ fullText: "```bash\ngit status\n```" }];
+      await ask(messages, pool);
+    }
+    expect(scripted.texts.at(-1)).not.toContain("exact call");
+    scripted.queue = [];
+  });
 });
 describe("a new harness session that shares the first user message", () => {
   const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];

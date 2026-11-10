@@ -127,6 +127,14 @@ prompt is tuned. The layers, in handler order:
   `patch` tool result, the strict `*** Begin Patch` shape is re-sent (then every 10th call
   while failures persist) so the model stops retrying heredoc/`sed -i` variants on stale
   context. (Bertogim d300c24.)
+- **Identical-call loop breaker** (`callLoopNote`): when the harness re-sends the exact same
+  call (tool + serialized arguments) >=3 times consecutively at the tail of the history
+  (`CALL_LOOP_THRESHOLD`), the next delta carries a directed note naming the call and the
+  placeholder to replace (e.g. `<rama>`). Built from the live gpt-6.1-sol push loop of
+  2026-11-10: `shell("git push origin <rama>")` replayed ~12 times (cid
+  `61597ee3-2f7f-4892-aee7-52abbbb97081`, 16:05-16:07 UTC) with the same PowerShell
+  ParserError each time while the model narrated "I have no tools" — the confabulation
+  retry never fired because `hasToolCalls=true`.
   shape together.
 - **Hallucinated-completion retry** (`looksLikeHallucinatedCompletion`): if the model CLAIMS
   a file mutation ("I've replaced the README") with **no tool call all conversation**, force a

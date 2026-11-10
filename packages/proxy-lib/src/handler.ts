@@ -645,7 +645,58 @@ export function isOnlyNoopShellCall(call: ParsedToolCall): boolean {
   );
 }
 
-// --- Delta message formatting ---
+// --- Identical-call loop breaker. From the live gpt-6.1-sol push loop of
+// 2026-11-10: the same `shell("git push origin <rama>")` replayed ~12 times, each
+// with the same PowerShell ParserError as its tool result, while the model
+// narrated "I have no tools". With tool calls present the confabulation retry
+// sees count>0 and stays out, so nothing broke the cycle. Repeating the exact
+// same call is itself the signal (a call whose result was useful doesn't need
+// repeating); 2 identical is a wasted round trip, 3 is a loop. ---
+
+const CALL_LOOP_THRESHOLD = 3;
+
+function callKeyOf(tc: { function: { name: string; arguments: string } }): string {
+  return `${tc.function.name}|${tc.function.arguments || ""}`;
+}
+
+/** The new messages re-send as a tool call the SAME (tool, arguments) that has
+ *  already repeated >= CALL_LOOP_THRESHOLD times consecutively at the tail of the
+ *  history. Returns the text to prepend (or null). */
+export function callLoopNote(newMessages: ParsedMessage[], history: ParsedMessage[]): string | null {
+  const pending = newMessages.filter(m => m.role === "assistant" && Array.isArray(m.tool_calls))
+    .flatMap(m => m.tool_calls.map(callKeyOf));
+  const prior: string[] = [];
+  for (const m of history) {
+    if (m.role === "assistant" && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) prior.push(callKeyOf(tc));
+    }
+  }
+  // The harness re-sends the whole history append-only, so the last pending key
+  // is also in `prior`. Count its consecutive tail repetitions there.
+  const key = pending[0];
+  if (!key) return null;
+  let repeats = 0;
+  for (let i = prior.length - 1; i >= 0; i--) {
+    if (prior[i] !== key) break;
+    repeats++;
+  }
+  if (repeats < CALL_LOOP_THRESHOLD) return null;
+  const bar = key.indexOf("|");
+  const name = key.slice(0, bar);
+  const args = key.slice(bar + 1);
+  return [
+    `You have now sent this exact call ${repeats} times: \`${name}\` with arguments \`${truncLine(args, 220)}\`,`,
+    `and it keeps failing with the same error (the harness gave you its real output each time).`,
+    `Do NOT send it unchanged again: replace placeholder values (anything inside <>, like <rama>) with real ones the harness gave you, or fix the command the error points at.`,
+    `If the change needs something only I can provide (${name === "shell" ? "the correct value to substitute, a password, a path" : "the actual value to send"}), ask me for it in plain text instead of calling the tool again.`,
+  ].join("\n");
+}
+
+function truncLine(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}...` : s;
+}
+
+
 // --- Delta message formatting ---
 
 /** Format the messages new since the last turn. `history` is the whole request:
@@ -814,10 +865,20 @@ export async function handleChatCompletion(
       // The upstream conversation retains its initial framing, tool schemas
       // and workflow preferences. Send only new messages on continuations.
       text = delta;
+      // Loop breaker (live, 2026-11-10): the same failing call re-sent verbatim
+      // several times — the model kept replaying shell("git push origin <rama>")
+      // while narrating it had no tools, and the confabulation retry saw
+      // count>0 so nothing fired. A directed note beats the generic reminder
+      // because it names the exact call and the placeholder to fix.
+      const loopNote = callLoopNote(newMessages, body.messages);
+      if (loopNote) {
+        text = `${loopNote}\n\n${text}`;
+        log.info("Prepended the identical-call loop note");
+      }
+      const callOrdinal = proxyCallOrdinal(body.messages);
       // Every 10th proxy call, quietly re-pin tool use as the default (see the
       // PERIODIC_TOOL_REMINDER note). A tool request only: a chat continuation
       // shouldn't be pushed back into acting.
-      const callOrdinal = proxyCallOrdinal(body.messages);
       if (hasTools && periodicToolReminderDue(callOrdinal)) {
         text = `${PERIODIC_TOOL_REMINDER}\n\n${text}`;
         log.info(`Prepended periodic tool reminder on proxy call ${callOrdinal}`);
