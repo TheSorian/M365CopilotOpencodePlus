@@ -1,8 +1,21 @@
-# m365-copilot-proxy-opencode
+# M365CopilotOpencodePlus — M365 Copilot as an OpenAI-compatible backend
 
-> **Designed for use with OpenCode.** This fork adapts the Microsoft 365 Copilot proxy for use as an OpenAI-compatible backend in OpenCode.
+> **This repository is a fork of a fork.** It started from
+> [Bertogim/m365-copilot-proxy-opencode](https://github.com/Bertogim/m365-copilot-proxy-opencode),
+> which is a fork of the original
+> [cramt/m365-copilot-proxy](https://github.com/cramt/m365-copilot-proxy). The proxy, the M365
+> Copilot WebSocket/SignalR work, the Copilot Studio agent trick and almost everything written up in
+> [docs/](docs/) come from those two projects. Their MIT licence is kept, and the `LICENSE` file is
+> their notice, verbatim — see [Credits](#credits). GitHub does not register this repository as a
+> fork, so there is no "forked from" badge; the lineage is this note, the git history and the credits.
 
-Use Microsoft 365 Copilot as an LLM backend for OpenAI-compatible coding agents like [pi](https://pi.dev/) and [OpenClaw](https://docs.openclaw.ai/). Wraps M365 Copilot's WebSocket/SignalR API in an OpenAI-compatible interface with tool calling support.
+Use Microsoft 365 Copilot as an LLM backend for OpenAI-compatible coding agents like [pi](https://pi.dev/) and [OpenClaw](https://docs.openclaw.ai/). Wraps M365 Copilot's WebSocket/SignalR API in an OpenAI-compatible interface with tool calling support. Designed for use with OpenCode.
+
+What this fork adds on top of the upstream work: a self-update of this repository on every proxy
+start ([`scripts/self-update.ps1`](scripts/self-update.ps1), wired into `start-m365.cmd`), a breaker
+for identical-tool-call loops plus the no-op shell retry / periodic tool reminder / patch note (the
+last three ported from Bertogim's later commits), tool schemas re-sent on every nudge and
+confabulation retry, and the Spanish operator notes in [NOTAS.md](NOTAS.md).
 
 > **Want the gory protocol details?** See [docs/m365-copilot-api.md](docs/m365-copilot-api.md) — a full write-up of M365 Copilot's undocumented WebSocket API: auth, SignalR frames, tones/models, throttling, the "Disengaged" filter, and the Copilot Studio agent trick that makes tool calling work.
 
@@ -124,8 +137,8 @@ recovered by this command. The first retained line may be mid-message, and
 ### 1. Install
 
 ```sh
-git clone https://github.com/Bertogim/m365-copilot-proxy-opencode
-cd m365-copilot-proxy-opencode
+git clone https://github.com/TheSorian/M365CopilotOpencodePlus
+cd M365CopilotOpencodePlus
 pnpm install
 pnpm build
 ```
@@ -320,7 +333,7 @@ module:
 ```nix
 # flake.nix
 {
-  inputs.m365.url = "github:Bertogim/m365-copilot-proxy-opencode";
+  inputs.m365.url = "github:TheSorian/M365CopilotOpencodePlus";
 
   outputs = { nixpkgs, m365, ... }: {
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
@@ -346,7 +359,7 @@ module:
 The service runs as a hardened `DynamicUser` unit. Auth state (`msal-cache.json`,
 `agent-id.json`) persists in `/var/lib/m365-copilot-proxy`; a fresh deploy self-bootstraps
 via headless login using `secretsFile` + the bundled Chromium. To run the package directly
-without NixOS: `nix run github:Bertogim/m365-copilot-proxy-opencode -- 4141`.
+without NixOS: `nix run github:TheSorian/M365CopilotOpencodePlus -- 4141`.
 
 ## Available models
 
@@ -750,8 +763,32 @@ pnpm run test:live    # Run live integration tests against M365
 - `claude-sonnet-5.5` needs a paid/premium seat and has a priority-access quota of its own (80 turns a day, 150 a week), handled the same way (`M365_SONNET_FALLBACK_MODEL`). `claude-sonnet-5` needs the seat but has no quota
 - Streaming: **tool-less** responses stream incrementally (deltas forwarded as they arrive). **Tool-calling** turns are still buffered server-side — the raw text has to be parsed for tool-call fences before it can be emitted — so those arrive as a single chunk at the end (with an immediate HTTP 200 + heartbeats so the client never times out waiting)
 
+## Credits
+
+This repository is a derivative work, distributed under the MIT licence inherited from upstream:
+
+- **Original project - [cramt/m365-copilot-proxy](https://github.com/cramt/m365-copilot-proxy)**,
+  by Alexandra Östermark ([@cramt](https://github.com/cramt)): the proxy itself, the M365
+  Copilot WebSocket/SignalR client, the Copilot Studio agent trick, the "Disengaged" filter and
+  throttling findings, and most of [docs/m365-copilot-api.md](docs/m365-copilot-api.md) and
+  [docs/hypotheses.md](docs/hypotheses.md). Copyright (c) 2026 Alexandra Östermark, MIT - the
+  [`LICENSE`](LICENSE) file is that notice and is kept unchanged.
+- **OpenCode fork - [Bertogim/m365-copilot-proxy-opencode](https://github.com/Bertogim/m365-copilot-proxy-opencode)**:
+  the OpenCode adaptation this repository started from: the fenced/shell tool framing, the
+  `M365_OPENCODE_*` environment, `scripts/bench/` and the prompt-engineering notes. The upstream
+  issues linked from this README (#4, #18, #64...) live in that repository.
+- **Contributors credited inline:** [@EatonWu](https://github.com/EatonWu) (interactive approval),
+  [@neffer77](https://github.com/neffer77), [@romunro](https://github.com/romunro),
+  [@mahmoudsallem](https://github.com/mahmoudsallem),
+  [@FreemindTrader](https://github.com/FreemindTrader).
+
+If you wrote part of this tree and the credit above is wrong or missing, open an issue and it will
+be fixed.
+
 ## License
 
-[MIT](LICENSE). Use at your own risk — this speaks to Microsoft's API with your own
-credentials, on your own account, and that's between you and your tenant's
-acceptable-use policy.
+[MIT](LICENSE), the upstream licence: the `LICENSE` file is the original notice (Copyright (c) 2026
+Alexandra Östermark) and covers the code inherited from `cramt/m365-copilot-proxy`; the
+modifications in this fork are released under the same terms. Use at your own risk - this speaks to
+Microsoft's API with your own credentials, on your own account, and that's between you and your
+tenant's acceptable-use policy.
