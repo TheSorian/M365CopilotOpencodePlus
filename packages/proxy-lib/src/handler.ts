@@ -697,6 +697,29 @@ function truncLine(s: string, max: number): string {
 }
 
 
+/**
+ * Collapse an upstream reply that consists of two byte-identical copies of one
+ * tool-bearing response. M365 has emitted this shape in production: live
+ * streaming announces the tool in the first copy, while final parsing sees two
+ * fences and may classify the doubled response as a prose document. Restrict
+ * this to an exact whole-response tandem repeat whose half independently parses
+ * as a tool call, so ordinary repeated prose and distinct repeated commands are
+ * preserved. (TurnTextComposer folds the same replay when M365 sends it as a
+ * second message under a new messageId; this covers the single-message shape.)
+ */
+function collapseExactRepeatedToolReply(
+  text: string,
+  tools: Parameters<typeof parseToolCalls>[1],
+): string {
+  if (text.length === 0 || text.length % 2 !== 0) return text;
+  const half = text.length / 2;
+  const first = text.slice(0, half);
+  if (first !== text.slice(half)) return text;
+  if (!parseToolCalls(first, tools).hasToolCalls) return text;
+  log.info(`Collapsed an exactly duplicated tool response (${text.length} chars to ${half})`);
+  return first;
+}
+
 // --- Delta message formatting ---
 
 /** Format the messages new since the last turn. `history` is the whole request:
@@ -1262,7 +1285,10 @@ export async function handleChatCompletion(
     if ("error" in result) return { kind: "error", resp: result.error };
     conv.sentMessageCount = body.messages.length;
     conv.sentMessageSnapshot = body.messages.map(messageSnapshot);
-    let fullText = stopAtFabricatedResult(result.fullText);
+    let fullText = collapseExactRepeatedToolReply(
+      stopAtFabricatedResult(result.fullText),
+      body.tools,
+    );
 
     log.debug("Raw response (tool mode):", trunc(fullText, 1000));
     let { parsed, judged } = parseReply(fullText, body.tools);
@@ -1300,7 +1326,10 @@ export async function handleChatCompletion(
       if ("error" in retry) return { kind: "error", resp: retry.error };
       conv.sentMessageCount = body.messages.length;
       conv.sentMessageSnapshot = body.messages.map(messageSnapshot);
-      fullText = stopAtFabricatedResult(retry.fullText);
+      fullText = collapseExactRepeatedToolReply(
+        stopAtFabricatedResult(retry.fullText),
+        body.tools,
+      );
       ({ parsed, judged } = parseReply(fullText, body.tools));
       log.info(`After forcing retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
     }
@@ -1320,7 +1349,10 @@ export async function handleChatCompletion(
       if ("error" in retry) return { kind: "error", resp: retry.error };
       conv.sentMessageCount = body.messages.length;
       conv.sentMessageSnapshot = body.messages.map(messageSnapshot);
-      fullText = stopAtFabricatedResult(retry.fullText);
+      fullText = collapseExactRepeatedToolReply(
+        stopAtFabricatedResult(retry.fullText),
+        body.tools,
+      );
       ({ parsed, judged } = parseReply(fullText, body.tools));
       log.info(`After no-op shell retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
     }

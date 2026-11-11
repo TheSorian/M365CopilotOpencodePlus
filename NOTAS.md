@@ -129,6 +129,11 @@ No crea tags: los hitos se etiquetan a mano, uno por versión buena:
 adoptarla; si sale roja (o hay conflicto) la borra y no se ha traído nada. `-Keep` la
 conserva para mirar el fallo.
 
+Lo que de Bertogim sí se ha aprovechado se ha portado a mano, sin traer `packages/prompts/`:
+su `d521e68` (M365 repite la misma respuesta bajo otro `messageId`; el compositor la pliega en
+vez de duplicarla) y su `4b0da8d` (la respuesta doble llega a veces dentro de un solo mensaje:
+el handler colapsa el repetido exacto). Los dos con test unitario. El resto de su `main` es su
+propio system prompt y sus logs, que aquí no aplican.
 Es la puerta correcta para Bertogim: el 2026-11-05 su `main` llevaba 12 commits por delante
 con la suite en rojo (reescritura del system prompt en `packages/prompts/`, sin bloque
 `<tools>`), así que fusionarlo a mano solo mete fallos.

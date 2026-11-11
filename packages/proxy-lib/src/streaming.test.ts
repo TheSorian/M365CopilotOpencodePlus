@@ -2070,3 +2070,39 @@ describe("synthetic proxy waiting indicator", () => {
     expect(chunks.some(c => c.choices?.[0]?.delta?.reasoning_content)).toBe(false);
   });
 });
+describe("a tool response M365 sent twice in one reply", () => {
+  // M365 has emitted the whole tool-bearing answer twice inside one message: live
+  // streaming announces the tool in the first copy, while final parsing sees two
+  // fences and can classify the doubled reply as prose. Ported from
+  // Bertogim/m365-copilot-proxy-opencode 4b0da8d.
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+
+  it("collapses an exact tandem repeat so the call runs once", async () => {
+    const fence = "```bash\nls -la\n```";
+    scripted.result = null;
+    scripted.queue = [{ fullText: `${fence}\n\n${fence}` }];
+    const res = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet", stream: false, tools,
+      messages: [{ role: "user", content: `sent twice ${Math.random()}` }],
+    }), new SessionPool());
+    expect(res.status).toBe(200);
+    const r = await res.json();
+    const calls = r.choices[0].message.tool_calls;
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0].function.arguments).command).toBe("ls -la");
+    scripted.queue = [];
+  });
+
+  it("does not treat two different commands as a duplicate", async () => {
+    scripted.result = null;
+    scripted.queue = [{ fullText: "```bash\nls\n```\n\n```bash\ngit status\n```" }];
+    const res = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet", stream: false, tools,
+      messages: [{ role: "user", content: `two commands ${Math.random()}` }],
+    }), new SessionPool());
+    const r = await res.json();
+    expect(r.choices[0].message.tool_calls).toHaveLength(1);
+    expect(JSON.parse(r.choices[0].message.tool_calls[0].function.arguments).command).toBe("ls");
+    scripted.queue = [];
+  });
+});

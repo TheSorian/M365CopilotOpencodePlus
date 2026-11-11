@@ -192,6 +192,30 @@ describe("TurnTextComposer (multi-message turns)", () => {
     expect(compose(frames).streamed).toBe("alpha\nbeta");
   });
 
+  it("folds a replayed response sent under a new messageId instead of repeating it", () => {
+    // M365 sometimes replays the same logical answer under a fresh messageId. The
+    // old join("\n\n") emitted the whole answer twice, and a doubled reply parses
+    // as prose. Ported from Bertogim/m365-copilot-proxy-opencode d521e68.
+    const r = compose([
+      { cursor: cur("m1"), s: "Hello", id: "m1" },
+      { d: " there" },
+      { s: "Hello there", id: "m1" },
+      { cursor: cur("m2"), s: "Hel", id: "m2" },
+      { d: "lo there" },
+      { s: "Hello there!", id: "m2" },
+    ]);
+    expect(r.text).toBe("Hello there!");
+    expect(r.answer).toBe("Hello there!");
+    expect(r.streamed).toBe("Hello there!");
+  });
+
+  it("still joins two genuinely different messages", () => {
+    const r = compose([
+      { cursor: cur("m1"), s: "Let me check.", id: "m1" },
+      { cursor: cur("m2"), s: "```bash\nls\n```", id: "m2" },
+    ]);
+    expect(r.text).toBe("Let me check.\n\n```bash\nls\n```");
+  });
   it("routes deltas by cursor, not by whichever snapshot arrived last", () => {
     // A late final snapshot of message 1 lands after message 2's cursor; the
     // deltas that follow still belong to message 2.
