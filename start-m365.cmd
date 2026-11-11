@@ -3,7 +3,9 @@ setlocal
 rem Arranca el proxy M365 Copilot en el puerto indicado (por defecto 4141).
 rem Primer arranque: abre un navegador para iniciar sesion a mano (MFA push/FIDO2/Okta valen).
 rem Despues de ese primer login, los tokens se refrescan solos desde la cache MSAL.
-rem No comprueba ni aplica actualizaciones: eso se hace aparte con update-m365.cmd.
+rem Al arrancar pone al dia el repo propio (origin) y compila si hace falta;
+rem las novedades de cramt/Bertogim siguen siendo cosa de update-m365.cmd.
+rem Para saltarse la comprobacion en un arranque: set M365_SKIP_UPDATE=1
 
 set M365_ENABLE_INTERACTIVE_APPROVAL=1
 rem El login usa por defecto UA de Linux, locale en-GB y zona Europe/Copenhagen.
@@ -30,9 +32,23 @@ if exist "%USERPROFILE%\.config\opencode-m365\debug.log" (
   )
 )
 
+if defined M365_SKIP_UPDATE goto arrancar
+set "PS=powershell"
+where pwsh >nul 2>nul
+if not errorlevel 1 set "PS=pwsh"
+echo [local-AI] Poniendo el repo propio al dia con origin...
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\self-update.ps1"
+if errorlevel 1 goto sinproxy
 :arrancar
 if "%~1"=="" (
   node packages\proxy\bin\m365-proxy.mjs 4141
 ) else (
   node packages\proxy\bin\m365-proxy.mjs %1
 )
+exit /b 0
+
+:sinproxy
+echo.
+echo [ERROR] No hay proxy usable: mira los mensajes de arriba.
+pause
+exit /b 1

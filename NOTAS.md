@@ -16,9 +16,20 @@ Con el proxy corriendo, en OpenCode: `/models` -> `M365 · GPT-6.1 Sol`.
 
 El proxy tiene que estar corriendo antes de usar el modelo. Si lo paras, ese modelo falla.
 
-No mira ni aplica actualizaciones: arranca con lo que ya está compilado. Las
-actualizaciones se hacen aparte y a mano con `update-m365.cmd` (ver más abajo).
+Al arrancar se pone al día **solo**, pero solo del repo propio: trae `origin/main`
+por fast-forward, hace `pnpm install` si cambia el lockfile y `pnpm build` si el
+commit aún no está compilado. Por eso, en otro ordenador, un `git clone` normal y
+doble clic basta: la primera vez instala, compila y arranca.
 
+No toca nada si el árbol tiene cambios sin commitear, si estás en otra rama, si
+`main` tiene commits locales sin subir o si no hay red: avisa y arranca con lo que
+ya está compilado. Si el commit nuevo no compila, vuelve al anterior y arranca con
+ese. Para saltarse la comprobación en un arranque concreto:
+
+    set M365_SKIP_UPDATE=1
+
+Las novedades de cramt y de Bertogim **no** entran por aquí: siguen siendo
+`update-m365.cmd`, con rama temporal y validación (ver más abajo).
 ## Los ajustes que importan
 
 Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
@@ -32,6 +43,7 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_OPENCODE_TOOLS=...              allowlist propia: 10 tools, con skill y execute
     set M365_IMAGE_DIR=%USERPROFILE%\Pictures\m365   imágenes generadas (por defecto ~/Pictures)
     set M365_FAIL_CLOSED_CONFAB=1            502 si la negativa persiste (opt-in; por defecto 200)
+    set M365_SKIP_UPDATE=1                   arranca sin buscar actualizaciones del repo propio
 
 Lo del UA/locale/zona no es cosmético: el login abre un Chromium visible y, con los
 valores por defecto, la huella dice "Linux, en-GB, Copenhague" mientras el navegador
@@ -63,11 +75,14 @@ es una lista de patrones y un falso positivo convertiría una respuesta legítim
 4. Error 429 / `m365_throttled` -> cupo agotado (~100 turnos, +1,6/min). Esperar; no reintentar en bucle.
 5. El proxy no arranca -> `pnpm.cmd install && pnpm.cmd build` y mirar `~/.config/opencode-m365/debug.log`.
 
-## Actualizar (viene de dos sitios)
+## Actualizar (tres puertas)
 
 Este repo es la unificación de dos: el fork de Bertogim (los arreglos para OpenCode) y el
 original de cramt (el protocolo). Cada uno entra por su puerta, y **`main` no se fusiona
 nunca a ciegas**: primero se prueba en una rama temporal y solo avanza si sale verde.
+
+El arranque del proxy ya cubre la puerta del repo propio (`origin`, opción 4). Las otras
+dos, la de cramt y la de Bertogim, se abren siempre a mano con `update-m365.cmd`.
 
     update-m365.cmd
 
@@ -75,12 +90,14 @@ Abre un menú:
 
     1 - Actualizar desde cramt (upstream)   valida en rama temporal; main solo si está verde
     2 - Revisar Bertogim                    rama aparte; main no se toca
-    3 - Ver que hay nuevo                   solo lectura
-    4 - Salir
+    3 - Ver que hay nuevo                   solo lectura (las tres puertas)
+    4 - Actualizar del repo propio (origin) igual que hace el arranque
+    5 - Salir
 
 También vale como argumento: `update-m365.cmd 1`. La lógica vive en
-`scripts\update-upstream.ps1` y `scripts\review-bertogim.ps1` (PowerShell y no batch: así se
-comprueba el código de salida de git y de pnpm paso a paso, y se puede probar).
+`scripts\update-upstream.ps1`, `scripts\review-bertogim.ps1` y `scripts\self-update.ps1`
+(PowerShell y no batch: así se comprueba el código de salida de git y de pnpm paso a paso,
+y se puede probar).
 
 ### 1. Actualizar desde cramt
 
@@ -123,14 +140,39 @@ Los remotos:
     upstream    el original de cramt (lo que sigue Bertogim)
     local       tu clon de cramt en G:\local-AI\m365-copilot-proxy (si existe)
 
-De `origin` no se trae nada: es solo destino. Las novedades entran por `bertogim` y
+De `origin` solo se trae lo que publican tus otras máquinas: lo hace el arranque (o
+`update-m365.cmd 4`) por fast-forward. Las novedades de fondo entran por `bertogim` y
 `upstream`, y como `origin` es el remoto por defecto, `git push` a secas ya sube a tu repo.
+
+### 3. Ver que hay nuevo
+
+Solo lectura: `git fetch --all` y enseña los commits que traen `origin`, `upstream` y
+`bertogim` por delante de `main`. No aplica nada.
+
+### 4. Repo propio (origin)
+
+Es lo mismo que hace el arranque, para lanzarlo a mano sin abrir el proxy:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\self-update.ps1
+    .\scripts\self-update.ps1 -Check     # solo ver si hay algo nuevo
+
+Solo hace fast-forward de `main` desde `origin/main`, y solo si el árbol está limpio (los
+ficheros sin seguimiento no cuentan: si el pull choca con uno, git aborta y se avisa).
+Después instala dependencias si cambió `pnpm-lock.yaml` o no hay `node_modules`, y compila
+si el HEAD no coincide con el sello `.git/m365-build-commit`. Ese sello es lo que deja que
+un clon nuevo se instale y compile solo la primera vez, y que los arranques siguientes no
+recompilen por gusto.
+
+Si el commit nuevo no compila, el script vuelve al anterior (`git reset --hard` del commit
+de partida; el árbol estaba limpio, así que no se pierde nada) y arranca con la versión que
+ya funcionaba. Si no hay red, avisa y sigue con lo compilado. Códigos de salida: `0` hay
+proxy que arrancar, `1` no lo hay (y el lanzador para en vez de arrancar a medias).
 
 ## Por que no se pierden nuestros cambios
 
 - `NOTAS.md`, `start-m365.cmd`, `update-m365.cmd` y `scripts\update-upstream.ps1` /
-  `scripts\review-bertogim.ps1` no existen en ninguno de los dos repos de origen: un merge no
-  puede borrarlos.
+  `scripts\review-bertogim.ps1` / `scripts\self-update.ps1` no existen en ninguno de los dos
+  repos de origen: un merge no puede borrarlos.
 - En los ficheros compartidos (`handler.ts`, `tools.ts`, `fenced.ts`...) git fusiona línea a
   línea: o aplica las dos cosas, o para con un conflicto. Nunca descarta en silencio un
   trozo que solo hemos tocado nosotros.

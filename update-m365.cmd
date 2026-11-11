@@ -24,9 +24,10 @@ echo.
 echo   1 - Actualizar desde cramt (upstream)   valida en rama temporal
 echo   2 - Revisar Bertogim                    rama aparte, no toca main
 echo   3 - Ver que hay nuevo                   solo lectura
-echo   4 - Salir
+echo   4 - Actualizar del repo propio (origin)  lo mismo que hace el arranque
+echo   5 - Salir
 echo.
-set /p "OPCION=Opcion [1-4]: "
+set /p "OPCION=Opcion [1-5]: "
 if not defined OPCION exit /b 2
 goto ejecutar
 
@@ -34,7 +35,8 @@ goto ejecutar
 if "%OPCION%"=="1" goto upstream
 if "%OPCION%"=="2" goto bertogim
 if "%OPCION%"=="3" goto estado
-if "%OPCION%"=="4" exit /b 0
+if "%OPCION%"=="4" goto propio
+if "%OPCION%"=="5" exit /b 0
 echo.
 echo Opcion no valida: "%OPCION%"
 exit /b 2
@@ -47,10 +49,19 @@ goto fin
 call :lanzar "scripts\review-bertogim.ps1"
 goto fin
 
+:propio
+rem Fast-forward de origin/main + install/build si hace falta. No fusiona nada:
+rem las otras dos puertas siguen siendo 1 y 2.
+call :lanzar "scripts\self-update.ps1"
+goto fin
+
 :estado
 echo.
 echo === Trayendo referencias (solo lectura) ===
 git fetch --all --prune --quiet
+echo.
+echo --- origin/main (nuestro repo; es lo que aplica el arranque) ---
+git log --oneline --no-decorate main..origin/main
 echo.
 echo --- upstream/main (cramt) ---
 git log --oneline main..upstream/main
