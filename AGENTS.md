@@ -202,6 +202,9 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   Code Mode twist: this harness sends MCP tools *inside* `execute`, not as flat entries, so
   `execute` is itself the door to every MCP — the launchers keep it, and dropping it from the
   default allowlist is deliberate but hides all MCPs from anyone on the defaults.
+  `search` is not that door: a name-only query came back empty and the model declared the
+  capability missing, while `search({query, namespace: "OfficeMCP"})` and calling
+  `tools.OfficeMCP.*` outright both worked (2026-11-11, real session).
   The confabulation patterns are per-language; add the one the user speaks, not just the one
   you tested in.
 - **`claude-opus` is entitlement-gated and separately metered.** The WS `scenario` decides which

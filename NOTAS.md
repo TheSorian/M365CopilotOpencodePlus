@@ -276,3 +276,32 @@ Dos avisos que cuestan tiempo si se olvidan:
 Copias de seguridad del cambio: `opencode.jsonc.bak-20261111_1723` y
 `opencode.json.bak-20261111_1723`.
 
+## Por qué falló el Word (evidencia, no teoría)
+
+El 11-11 se le dijo al usuario que la culpa era de la configuración. El registro dice
+otra cosa y conviene no volver a aprenderlo mal. Hubo **dos fallos distintos**:
+
+1. **Sesión sin carpeta.** A las 16:24:08 los cuatro MCP fallaron al conectar con
+   `NotFound: FileSystem.access (...\.config\openchamber\chats\2026-11-11\session-...)`:
+   la sesión de chat vivía en una carpeta que todavía no existía. Sin MCP conectado el
+   modelo no tenía Office y contestó "no tengo disponible la herramienta". El proxy no
+   tenía nada que ver.
+2. **MCP conectado pero invisible.** A las 16:00 OfficeMCP *sí* estaba conectado (lo
+   había hecho a las 15:43), pero el modelo lo buscó con `search({query: ...})` sin
+   `namespace`, no obtuvo nada y se fue a escribir PowerShell a mano. A las 16:44 la
+   misma tarea salió porque llamó `tools.OfficeMCP.RunPython` por su nombre, después de
+   buscar con `namespace: "OfficeMCP"`.
+
+Lecciones:
+
+- En Code Mode los MCP viajan dentro de `execute`: `search` no es la puerta, el nombre
+  `tools.<Servidor>.<Tool>` sí. Si una búsqueda no devuelve nada, se llama directo.
+- La migración a configuración global sigue valiendo —una sesión abierta en otra carpeta
+  sí necesita `mcp.servers`—, pero **no fue la causa** de este fallo.
+- El guardián de confabulación actuó 4 veces en esa sesión (16:43-16:49) y las 4
+  acabaron en una llamada real. La lista de patrones se ganó el sueldo, y el paso
+  siguiente no es aflojarla.
+- La receta completa de "el Word que tengo abierto" está en el skill global
+  `~/.config/opencode/skills/word-open-file/SKILL.md` (CoInitialize, SaveCopyAs,
+  Repaginate, medir antes de guardar, verificar texto párrafo a párrafo).
+
