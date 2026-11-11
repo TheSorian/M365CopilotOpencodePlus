@@ -239,11 +239,53 @@ elseif ($pullDone) {
     if ($changed -contains "pnpm-lock.yaml") { $needInstall = $true }
 }
 
+# Solo docs/scripts/ficheros .md no entran en el build: si el unico cambio desde
+# el ultimo build es de esos, se avanza el sello sin recompilar (15 s de menos en
+# cada arranque tras un commit de documentacion).
+function Test-BuildRelevant([string[]]$Paths) {
+    foreach ($path in $Paths) {
+        if (-not $path) { continue }
+        $norm = $path -replace "\\", "/"
+        if ($norm -like "docs/*") { continue }
+        if ($norm -like "scripts/*") { continue }
+        if ($norm -like ".github/*") { continue }
+        if ($norm -like "*.md") { continue }
+        return $true
+    }
+    return $false
+}
+
 $built = ""
 if (Test-Path $stampFile) { $built = (Get-Content $stampFile -Raw).Trim() }
-$needBuild = (-not (Test-UsableBuild)) -or ($built -ne $head)
+$needBuild = (-not (Test-UsableBuild))
 
-if (-not $needInstall -and -not $needBuild) { exit 0 }
+if (-not $needBuild -and $built -ne $head) {
+    $known = $false
+    if ($built) {
+        $verify = Invoke-Git rev-parse "--verify" "--quiet" "$built^{commit}"
+        $known = ($verify.Code -eq 0)
+    }
+    if (-not $known) {
+        # sello ilegible o de un commit que ya no existe: se recompila
+        $needBuild = $true
+    }
+    else {
+        $diff = Invoke-Git diff "--name-only" "$built..$head"
+        if ($diff.Code -ne 0 -or (Test-BuildRelevant $diff.Lines)) {
+            $needBuild = $true
+        }
+        else {
+            Write-Info "desde $(Get-Short $built) solo cambian docs/scripts; no recompilo"
+        }
+    }
+}
+
+if (-not $needInstall -and -not $needBuild) {
+    # El sello puede quedarse atras tras un commit de solo documentacion: se pone
+    # al dia para no repetir esta comprobacion en cada arranque.
+    if ($built -ne $head) { Set-Content -Path $stampFile -Value $head -NoNewline -Encoding ASCII }
+    exit 0
+}
 
 $pnpm = Get-Pnpm
 if (-not $pnpm) {
