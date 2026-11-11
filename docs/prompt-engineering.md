@@ -178,6 +178,16 @@ sandbox tools (3/7 vs relay 6/6, H25b), so `relay_batch` is plain relay when the
   replies; pi's lean set works. ([api §9].) A heavy harness can often be *made* lean —
   but note that opencode's own config/hook levers do not affect the outgoing request, so
   the trim has to happen in the proxy. ([api §9, "Trimming a heavy harness"].)
+- **Lean does not mean dropping a capability the harness tells the model to use.** The
+  trim is an allowlist, and OpenCode's own system prompt and skills name tools that must
+  therefore be on it. Hiding `officecli` and `OfficeMCP.*` left the model no path to an
+  open Word document, and it did not report "tool missing": it announced the refusal in
+  the user's language ("no tengo disponible la herramienta de ejecución", "el control de
+  aplicaciones de escritorio no está disponible") and that prose *was* the turn — the
+  forcing retry never fired. Two lessons: a prefix entry (`OfficeMCP.*`) keeps a whole
+  MCP usable without pinning names that drift, and the give-up detectors are per-language
+  — `CONFABULATION_PATTERNS` was thorough in English and Turkish and blind to the same
+  sentence in Spanish (2026-11-11, real OpenCode session, gpt-5.6-think-deeper).
 - **Measure on *unfakeable* tasks.** The model hallucinates success on tasks it can answer
   from memory (fizzbuzz, count-lines) with 0 tool calls; only unfakeable tasks (fix-bug,
   find-needle, edit-config) force real calls. ([api §10 "measurement traps"].)

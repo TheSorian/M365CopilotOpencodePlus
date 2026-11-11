@@ -16,10 +16,14 @@ set "M365_LOGIN_TIMEZONE=Europe/Madrid"
 set M365_DEBUG=1
 rem Frena antes de agotar el cupo de turnos (~100, +1.6/min) y evita el bloqueo de ~1h:
 set M365_AVOID_THROTTLING=1
-rem Recorte de tools ACTIVADO: 16 -> 10. Se conservan `skill` y `execute` a proposito.
+rem Recorte de tools ACTIVADO. Se conservan las de codigo, `skill`, `execute` y las de
+rem Office: `officecli` y el MCP `OfficeMCP.*` (una entrada con * casa por prefijo, asi
+rem que no hay que fijar las 14 tools del MCP una a una).
+rem Sin las de Office el modelo no puede tocar un documento: contesta en prosa que no
+rem tiene herramienta de ejecucion en lugar de editar.
 rem Para volver al allowlist del fork (8 tools, sin skill ni execute), borra la linea siguiente.
 rem Para desactivar el recorte del todo, anade: set M365_OPENCODE_TRIM=0
-set M365_OPENCODE_TOOLS=shell,read,edit,write,grep,glob,webfetch,websearch,question,patch,apply_patch,skill,execute
+set M365_OPENCODE_TOOLS=shell,read,edit,write,grep,glob,webfetch,websearch,question,patch,apply_patch,skill,execute,officecli,OfficeMCP.*
 
 cd /d "%~dp0"
 

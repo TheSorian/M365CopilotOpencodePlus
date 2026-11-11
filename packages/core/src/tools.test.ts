@@ -366,6 +366,15 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("La herramienta de edición no está disponible en esta conversación.")).toBe(true);
   });
 
+  it("flags the Spanish give-ups of a hidden toolset (2026-11-11, Office)", () => {
+    // Exact live replies: the request carried no Office tool (the OpenCode
+    // allowlist trimmed `officecli` and `OfficeMCP.*`), so the model announced the
+    // refusal instead of editing. Both reached the user as final answers.
+    expect(looksLikeConfabulation("No puedo completar la edición del Word abierto en esta sesión porque el control de aplicaciones de escritorio no está disponible ahora mismo.")).toBe(true);
+    expect(looksLikeConfabulation("En este turno no tengo disponible la herramienta de ejecución para lanzar PowerShell, así que no puedo realizar la modificación directamente ahora.")).toBe(true);
+    expect(looksLikeConfabulation("La herramienta de ejecución no está disponible en esta sesión.")).toBe(true);
+  });
+
   it("does NOT flag a Spanish project summary that only describes the setup", () => {
     expect(looksLikeConfabulation("El proxy envía las peticiones a M365 y no devuelve imágenes en base64.")).toBe(false);
     expect(looksLikeConfabulation("La sesión usa MSAL y las herramientas de edición están disponibles.")).toBe(false);
@@ -907,6 +916,40 @@ When you create a worktree outside the current working directory, consider using
     process.env.M365_OPENCODE_TOOLS = "shell,read";
     try {
       expect(trimOpenCodeTools(openCodeTools).map((t) => t.function.name)).toEqual(["read", "shell", "write"]);
+    } finally {
+      delete process.env.M365_OPENCODE_TOOLS;
+    }
+  });
+
+  it("offers the Office tools by default (officecli + the Office MCP)", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    const office = [
+      tool("shell", { command: { type: "string" } }, "Run a command"),
+      tool("officecli", { command: { type: "string" } }, "Office CLI"),
+      tool("OfficeMCP.RunPython", { code: { type: "string" } }, "Run python against Office"),
+    ];
+    expect(trimOpenCodeTools(office).map((t) => t.function.name)).toEqual([
+      "shell",
+      "officecli",
+      "OfficeMCP.RunPython",
+    ]);
+  });
+
+  it("matches an allowlist entry ending in * as a prefix", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    const mcp = [
+      tool("shell", { command: { type: "string" } }, "Run a command"),
+      tool("OfficeMCP.RunPython", { code: { type: "string" } }, "Run python against Office"),
+      tool("OfficeMCP.Launch", { app_name: { type: "string" } }, "Launch an app"),
+      tool("playwright.browser_click", { target: { type: "string" } }, "Click"),
+    ];
+    process.env.M365_OPENCODE_TOOLS = "shell,OfficeMCP.*";
+    try {
+      expect(trimOpenCodeTools(mcp).map((t) => t.function.name)).toEqual([
+        "shell",
+        "OfficeMCP.RunPython",
+        "OfficeMCP.Launch",
+      ]);
     } finally {
       delete process.env.M365_OPENCODE_TOOLS;
     }

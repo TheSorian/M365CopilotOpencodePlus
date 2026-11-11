@@ -40,7 +40,7 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_LOGIN_TIMEZONE=Europe/Madrid    por defecto Europe/Copenhagen
     set M365_DEBUG=1                         log en ~/.config/opencode-m365/debug.log
     set M365_AVOID_THROTTLING=1              frena antes de agotar el cupo
-    set M365_OPENCODE_TOOLS=...              allowlist propia: 10 tools, con skill y execute
+    set M365_OPENCODE_TOOLS=...              allowlist propia; admite prefijos terminados en *
     set M365_IMAGE_DIR=%USERPROFILE%\Pictures\m365   imágenes generadas (por defecto ~/Pictures)
     set M365_FAIL_CLOSED_CONFAB=1            502 si la negativa persiste (opt-in; por defecto 200)
     set M365_SKIP_UPDATE=1                   arranca sin buscar actualizaciones del repo propio
@@ -50,11 +50,22 @@ valores por defecto, la huella dice "Linux, en-GB, Copenhague" mientras el naveg
 corre en un Windows español (navigator.platform = Win32). El propio código avisa de
 que esa incoherencia es detectable. Si no estás en España, cambia la zona.
 
-Recorte de tools: ACTIVADO con allowlist propia. De las 16 tools que manda OpenCode se
-ofrecen 10: glob, grep, patch, question, read, shell, skill, webfetch, websearch, execute.
-Se caen las cinco `openchamber_*` y `subagent`.
+Recorte de tools: ACTIVADO con allowlist propia. De las tools que manda OpenCode se
+ofrecen las de código y consola (glob, grep, patch, question, read, shell, write, edit,
+apply_patch, skill, execute, webfetch, websearch) más las de Office. Se caen las
+`openchamber_*`, `subagent` y cualquier otro MCP que instales.
 Medido en el request real: 46.578 chars de prompt (allowlist del fork con 8 = 45.324;
 sin recorte con 16 = 51.516).
+
+Las de Office van en la lista a propósito, y son lo que arregló que `officeMCP` "fallara":
+`officecli` y `OfficeMCP.*`. Una entrada terminada en `*` casa por prefijo, así que
+`OfficeMCP.*` cubre las 14 tools del MCP sin fijarlas una a una (su lista cambia con la
+versión). Si el toolset tiene que quedar más corto, deja solo `OfficeMCP.RunPython`: es la
+que hace el trabajo; las demás son Launch/Quit/AvailableApps y utilidades.
+
+Con `M365_DEBUG=1` el log dice en cada request qué se ofreció, sin adivinar:
+`OpenCode toolset: 15/41 kept — shell, read, …, OfficeMCP.RunPython`.
+
 Para desactivar el recorte del todo: `set M365_OPENCODE_TRIM=0`.
 
 `M365_FAIL_CLOSED_CONFAB=1` no cambia lo que hace el proxy, solo qué devuelve cuando,
@@ -67,8 +78,10 @@ es una lista de patrones y un falso positivo convertiría una respuesta legítim
 
 ## Cuando algo va mal, en este orden
 
-1. Respuesta vacía o "no puedo ejecutar comandos" -> borrar la línea `M365_OPENCODE_TOOLS`
-   (allowlist del fork, 8 tools) o poner `M365_OPENCODE_TRIM=0` (sin recorte). Reiniciar proxy.
+1. Respuesta vacía, "no puedo ejecutar comandos" o "no tengo disponible la herramienta de
+   ejecución" -> mirar en el log qué se ofreció (`OpenCode toolset: ...`). Si falta la tool
+   que hacía falta, añádela a `M365_OPENCODE_TOOLS` (con `Nombre.*` entra todo un MCP), o
+   borra la línea, o pon `M365_OPENCODE_TRIM=0`. Reiniciar proxy.
 2. Sigue igual -> cambiar de modelo: `gpt-6-sol` o `claude-sonnet` (este último tool-callea bien).
 3. A media sesión dice que perdió las tools -> `/export`, chat nuevo, y mandar `RESTORECONTEXT`
    como mensaje (o pegar el export y pedir "lee las últimas 700 líneas y continúa").

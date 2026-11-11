@@ -223,8 +223,21 @@ const OPENCODE_SYSTEM_MARKER = /running in OpenCode|# Code Mode|<available_skill
  *  (`execute`, `skill`, `subagent`) belongs to Code Mode or costs prompt weight
  *  without moving a coding task. `question` and `patch` are kept on purpose: the
  *  proxy's notes tell the model how to use them.
- *  Override with `M365_OPENCODE_TOOLS=shell,read,...`. */
-const OPENCODE_DEFAULT_TOOLS = "shell,read,edit,write,grep,glob,webfetch,websearch,question,patch,apply_patch";
+ *  Override with `M365_OPENCODE_TOOLS=shell,read,...`.
+ *
+ *  Office is the exception that has to be in the DEFAULT list: a trimmed request
+ *  that hides `officecli` and the Office MCP leaves the model with no way to touch
+ *  a document, and it gives up in prose ("no tengo disponible la herramienta de
+ *  ejecución") instead of failing loudly. Measured 2026-11-11 in a real OpenCode
+ *  session editing Word: every Office tool was trimmed, and the model answered
+ *  "el control de aplicaciones de escritorio no está disponible". `OfficeMCP.*` is
+ *  a prefix entry because an MCP server's tool list varies with its version and
+ *  install, so pinning 14 names would go stale silently. Narrow it to
+ *  `OfficeMCP.RunPython` when the toolset must stay lean; nothing here matches on
+ *  a machine without that MCP. */
+const OPENCODE_DEFAULT_TOOLS =
+  "shell,read,edit,write,grep,glob,webfetch,websearch,question,patch,apply_patch," +
+  "officecli,OfficeMCP.*";
 
 export function isOpenCodeHarness(messages: Message[]): boolean {
   return messages.some(
@@ -232,18 +245,26 @@ export function isOpenCodeHarness(messages: Message[]): boolean {
   );
 }
 
+/** One allowlist entry as a matcher. A trailing `*` is a prefix, so `OfficeMCP.*`
+ *  opts in a whole MCP server without pinning each of its tool names. */
+function allowMatcher(pattern: string): (name: string) => boolean {
+  return pattern.endsWith("*")
+    ? (name) => name.startsWith(pattern.slice(0, -1))
+    : (name) => name === pattern;
+}
+
 /** Keep the fenced request lean: an allowlist of tools that can actually run a
  *  coding loop, plus the harness's shell/write tool if the harness named them
  *  differently. Parsing still uses the caller's original `tools`; only the
  *  rendered request is trimmed, so a tool outside the list still maps back. */
+
 export function trimOpenCodeTools(tools: ToolDef[]): ToolDef[] {
-  const allow = new Set(
-    (process.env.M365_OPENCODE_TOOLS ?? OPENCODE_DEFAULT_TOOLS)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-  const kept = tools.filter((t) => allow.has(t.function.name));
+  const allow = (process.env.M365_OPENCODE_TOOLS ?? OPENCODE_DEFAULT_TOOLS)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(allowMatcher);
+  const kept = tools.filter((t) => allow.some((matches) => matches(t.function.name)));
   const shell = findShellTool(tools);
   if (shell && !kept.some((t) => t.function.name === shell.function.name)) {
     kept.unshift(shell);
@@ -252,7 +273,13 @@ export function trimOpenCodeTools(tools: ToolDef[]): ToolDef[] {
   if (write && !kept.some((t) => t.function.name === write.function.name)) {
     kept.push(write);
   }
-  return kept.length > 0 ? kept : tools;
+  const result = kept.length > 0 ? kept : tools;
+  // What a request actually offered is the first thing to check when the model
+  // answers "I have no tool for that", and the log could not say it until now.
+  log.debug(
+    `OpenCode toolset: ${result.length}/${tools.length} kept — ${result.map((t) => t.function.name).join(", ")}`,
+  );
+  return result;
 }
 
 /** The toolset a request actually offers: the caller's list, adapted for
@@ -436,7 +463,17 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   /\b(?:este|el)\s+(?:chat|asistente|modelo)\s+no\s+(?:puede|tiene)\b[^.\n]{0,60}\b(?:archivos?|comandos?|sistema\s+de\s+archivos|herramientas?)\b/i,
   /\bcomo\s+(?:modelo\s+de\s+lenguaje|asistente(?:\s+de\s+IA)?|IA)\s+no\s+puedo\b/i,
   /\bherramientas?\s+(?:de|para)\s+(?:editar|edici[oó]n|ejecuci[oó]n|archivos?)[^.\n]{0,60}\bno\s+(?:está|están|se\s+encuentra|se\s+encuentran)\s+disponibles?\b/i,
-  /\b(?:reinicia|inicia|abre)\s+(?:la\s+tarea|la\s+sesi[oó]n|la\s+conversaci[oó]n)?\s*en\s+una\s+sesi[oó]n\s+(?:con\s+herramientas|de\s+c[oó]digo|de\s+programaci[oó]n|adecuada)/i
+  /\b(?:reinicia|inicia|abre)\s+(?:la\s+tarea|la\s+sesi[oó]n|la\s+conversaci[oó]n)?\s*en\s+una\s+sesi[oó]n\s+(?:con\s+herramientas|de\s+c[oó]digo|de\s+programaci[oó]n|adecuada)/i,
+  // The give-up that exposed the trimmed Office toolset (2026-11-11, real OpenCode
+  // session, gpt-5.6-think-deeper, a Word document open): "No puedo completar la
+  // edición … porque el control de aplicaciones de escritorio no está disponible
+  // ahora mismo" and "En este turno no tengo disponible la herramienta de
+  // ejecución". Neither matched — the verb list above has no `completar`, and "no
+  // tengo disponible" was missing entirely — so both reached the user as answers.
+  /\bno\s+(?:tengo|tenemos|hay)\s+disponibles?\b/i,
+  /\bno\s+puedo\s+(?:completar|terminar|finalizar|realizar)\b/i,
+  /\b(?:el\s+)?(?:control|acceso)\s+(?:de|a)\s+(?:aplicaciones|apps?|escritorio)[^.\n]{0,40}\bno\s+est[aá]n?\s+disponibles?\b/i,
+  /\bno\s+est[aá]\s+disponible\s+(?:ahora(?:\s+mismo)?|en\s+(?:esta|este)\s+(?:sesi[oó]n|turno|conversaci[oó]n|entorno))/i
 ];
 
 // M365 sometimes creates a real patch in its Teams-hosted remote artifact

@@ -188,6 +188,13 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - **M365 disengages on large tool payloads.** Keep injected toolsets lean. This is why
   pi works and heavy harnesses (opencode) don't. The proxy also enforces one tool call per
   turn and strips M365's invented `{confidence}`/`{final}` JSON (`M365_ALLOW_MULTI_TOOL` to opt out).
+  Lean has a floor, though: `M365_OPENCODE_TOOLS` is the allowlist the trim uses, and
+  anything it omits is invisible to the model — including the Office path, which is what
+  made `officeMCP` "fail" (2026-11-11): with `officecli`/`OfficeMCP.*` trimmed, the model
+  answered "no tengo disponible la herramienta de ejecución" instead of editing. Entries
+  accept a trailing `*` (`OfficeMCP.*`), and the debug log now prints what was kept
+  (`OpenCode toolset: N/M kept — …`). The confabulation patterns are per-language; add the
+  one the user speaks, not just the one you tested in.
 - **`claude-opus` is entitlement-gated and separately metered.** The WS `scenario` decides which
   model serves: `Claude_Opus` is Opus 5.5 on `OfficeWebPaidCopilot` and another model, Opus 4.8 (below), on
   `OfficeWebIncludedCopilot` (`getScenarioForModel`, derived per-turn from the model ID).
