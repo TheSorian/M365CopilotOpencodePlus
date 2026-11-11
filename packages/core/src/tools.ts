@@ -253,18 +253,34 @@ function allowMatcher(pattern: string): (name: string) => boolean {
     : (name) => name === pattern;
 }
 
+/** An MCP tool keeps its server in the name — `OfficeMCP.RunPython`,
+ *  `playwright.browser_click` — so a dot is the one signal the proxy can read
+ *  off the wire. Whoever runs the harness decides which servers are on (their
+ *  own config, their own `/mcps`), and trimming one of those tools here would
+ *  hide a capability the person believes they switched on. */
+function looksLikeMcpTool(name: string): boolean {
+  return name.includes(".");
+}
+
 /** Keep the fenced request lean: an allowlist of tools that can actually run a
  *  coding loop, plus the harness's shell/write tool if the harness named them
- *  differently. Parsing still uses the caller's original `tools`; only the
+ *  differently. MCP tools are never trimmed, and `*` turns the trim off
+ *  entirely. Parsing still uses the caller's original `tools`; only the
  *  rendered request is trimmed, so a tool outside the list still maps back. */
 
 export function trimOpenCodeTools(tools: ToolDef[]): ToolDef[] {
-  const allow = (process.env.M365_OPENCODE_TOOLS ?? OPENCODE_DEFAULT_TOOLS)
+  const patterns = (process.env.M365_OPENCODE_TOOLS ?? OPENCODE_DEFAULT_TOOLS)
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
-    .map(allowMatcher);
-  const kept = tools.filter((t) => allow.some((matches) => matches(t.function.name)));
+    .filter(Boolean);
+  if (patterns.includes("*")) {
+    log.debug(`OpenCode toolset: untrimmed — ${tools.length} tools offered`);
+    return tools;
+  }
+  const allow = patterns.map(allowMatcher);
+  const kept = tools.filter(
+    (t) => looksLikeMcpTool(t.function.name) || allow.some((matches) => matches(t.function.name)),
+  );
   const shell = findShellTool(tools);
   if (shell && !kept.some((t) => t.function.name === shell.function.name)) {
     kept.unshift(shell);
@@ -276,8 +292,11 @@ export function trimOpenCodeTools(tools: ToolDef[]): ToolDef[] {
   const result = kept.length > 0 ? kept : tools;
   // What a request actually offered is the first thing to check when the model
   // answers "I have no tool for that", and the log could not say it until now.
+  // The dropped names matter just as much: that is the half nobody could see.
+  const dropped = tools.filter((t) => !result.includes(t)).map((t) => t.function.name);
   log.debug(
-    `OpenCode toolset: ${result.length}/${tools.length} kept — ${result.map((t) => t.function.name).join(", ")}`,
+    `OpenCode toolset: ${result.length}/${tools.length} kept — ${result.map((t) => t.function.name).join(", ")}` +
+      (dropped.length > 0 ? ` | dropped — ${dropped.join(", ")}` : ""),
   );
   return result;
 }

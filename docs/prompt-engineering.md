@@ -188,6 +188,15 @@ sandbox tools (3/7 vs relay 6/6, H25b), so `relay_batch` is plain relay when the
   MCP usable without pinning names that drift, and the give-up detectors are per-language
   — `CONFABULATION_PATTERNS` was thorough in English and Turkish and blind to the same
   sentence in Spanish (2026-11-11, real OpenCode session, gpt-5.6-think-deeper).
+  **The trim stops at MCP tools.** A tool named for its server (`OfficeMCP.RunPython`,
+  `playwright.browser_click`) is kept even when the allowlist does not list it, and
+  `M365_OPENCODE_TOOLS=*` disables the trim. Which MCP servers exist is the person's decision,
+  made in their own client; a proxy that prunes them recreates the same silent refusal this
+  section is about, one layer down. Two more lessons from the log: OpenCode's Code Mode sends
+  MCP tools *inside* `execute` (so `execute` is the real MCP door), and `opencode mcp list`
+  is the only quick check of what the client actually configured — it answered "No MCP
+  servers configured" for a config written in the legacy `mcp.<name>` shape that the runtime
+  still executed.
   One more shape in that same session shows how narrow a pattern is: after announcing a
   background process it could not read the result files it had asked it to write ("No
   dispongo ahora de una herramienta activa para leer estos archivos"). `no dispongo de`

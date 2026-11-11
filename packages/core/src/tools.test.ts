@@ -946,13 +946,66 @@ When you create a worktree outside the current working directory, consider using
       tool("OfficeMCP.RunPython", { code: { type: "string" } }, "Run python against Office"),
       tool("OfficeMCP.Launch", { app_name: { type: "string" } }, "Launch an app"),
       tool("playwright.browser_click", { target: { type: "string" } }, "Click"),
+      tool("todowrite", {}, "Write a todo"),
     ];
     process.env.M365_OPENCODE_TOOLS = "shell,OfficeMCP.*";
     try {
+      // playwright.browser_click is kept because it is an MCP tool, not because
+      // `OfficeMCP.*` matched it; todowrite is the name the prefix must not reach.
       expect(trimOpenCodeTools(mcp).map((t) => t.function.name)).toEqual([
         "shell",
         "OfficeMCP.RunPython",
         "OfficeMCP.Launch",
+        "playwright.browser_click",
+      ]);
+    } finally {
+      delete process.env.M365_OPENCODE_TOOLS;
+    }
+  });
+
+  it("never trims an MCP tool, whatever the allowlist says", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    // The person switches servers on in their own OpenCode config (`/mcps`);
+    // a tool with a server in its name is theirs to keep, not ours to prune.
+    const tools = [
+      tool("shell", { command: { type: "string" } }, "Run a command"),
+      tool("read", { path: { type: "string" } }, "Read a file"),
+      tool("playwright.browser_click", { target: { type: "string" } }, "Click"),
+      tool("web-search.search_web", { q: { type: "string" } }, "Search"),
+      tool("cua-driver.run", { app: { type: "string" } }, "Drive an app"),
+      tool("unknown_builtin", { x: { type: "string" } }, "Not on the allowlist"),
+    ];
+    process.env.M365_OPENCODE_TOOLS = "shell";
+    try {
+      const names = trimOpenCodeTools(tools).map((t) => t.function.name);
+      // `read` and `unknown_builtin` are harness tools outside the allowlist and
+      // go; the three MCP tools stay because their names carry a server.
+      expect(names).toEqual([
+        "shell",
+        "playwright.browser_click",
+        "web-search.search_web",
+        "cua-driver.run",
+      ]);
+    } finally {
+      delete process.env.M365_OPENCODE_TOOLS;
+    }
+  });
+
+  it("trims nothing at all when the allowlist is *", async () => {
+    const { trimOpenCodeTools } = await import("./tools.js");
+    const tools = [
+      tool("shell", { command: { type: "string" } }, "Run a command"),
+      tool("list", {}, "List files"),
+      tool("todowrite", {}, "Write a todo"),
+      tool("OfficeMCP.RunPython", { code: { type: "string" } }, "Run python"),
+    ];
+    process.env.M365_OPENCODE_TOOLS = "*";
+    try {
+      expect(trimOpenCodeTools(tools).map((t) => t.function.name)).toEqual([
+        "shell",
+        "list",
+        "todowrite",
+        "OfficeMCP.RunPython",
       ]);
     } finally {
       delete process.env.M365_OPENCODE_TOOLS;

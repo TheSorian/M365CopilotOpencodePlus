@@ -192,9 +192,18 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   anything it omits is invisible to the model — including the Office path, which is what
   made `officeMCP` "fail" (2026-11-11): with `officecli`/`OfficeMCP.*` trimmed, the model
   answered "no tengo disponible la herramienta de ejecución" instead of editing. Entries
-  accept a trailing `*` (`OfficeMCP.*`), and the debug log now prints what was kept
-  (`OpenCode toolset: N/M kept — …`). The confabulation patterns are per-language; add the
-  one the user speaks, not just the one you tested in.
+  accept a trailing `*` (`OfficeMCP.*`), and the debug log prints what was kept and what was
+  dropped (`OpenCode toolset: N/M kept — … | dropped — …`).
+  **MCP tools are never trimmed, though, and that is a rule, not a default**: a tool whose
+  name carries its server (`OfficeMCP.RunPython`, `playwright.browser_click`) passes whatever
+  the allowlist says, and `M365_OPENCODE_TOOLS=*` turns the trim off entirely. The person
+  enables servers in their own OpenCode config and `/mcps`; pruning one behind their back
+  hides a capability they think is on (2026-11-11: the user asked for exactly that). Note the
+  Code Mode twist: this harness sends MCP tools *inside* `execute`, not as flat entries, so
+  `execute` is itself the door to every MCP — the launchers keep it, and dropping it from the
+  default allowlist is deliberate but hides all MCPs from anyone on the defaults.
+  The confabulation patterns are per-language; add the one the user speaks, not just the one
+  you tested in.
 - **`claude-opus` is entitlement-gated and separately metered.** The WS `scenario` decides which
   model serves: `Claude_Opus` is Opus 5.5 on `OfficeWebPaidCopilot` and another model, Opus 4.8 (below), on
   `OfficeWebIncludedCopilot` (`getScenarioForModel`, derived per-turn from the model ID).

@@ -258,11 +258,20 @@ Ojo: la primera ejecución tras abrir una carpeta nueva puede imprimir
 "No MCP servers configured" mientras arranca el servicio. Repetirlo a los pocos
 segundos; si sale `✓ ... connected`, está bien.
 
-**El recorte del proxy sigue mandando en lo que ve M365.** Que un MCP esté
-disponible en el cliente no significa que sus tools viajen en la petición: el proxy
-poda con `M365_OPENCODE_TOOLS`. Hoy la lista (en `start-m365.cmd` y
-`run_m365_proxy.bat`) lleva `officecli,OfficeMCP.*` y **no** lleva playwright ni
-cua-driver, así que esos 25+ tools no engordan el prompt (y no disparan Disengaged).
+**El recorte del proxy ya no toca ningún MCP.** Cualquier tool que lleve su servidor
+en el nombre (`OfficeMCP.RunPython`, `playwright.browser_click`) pasa siempre, aunque
+la lista no la mencione: los servidores los activas tú en OpenCode. Si algún día
+quieres que no recorte **nada**, pon `M365_OPENCODE_TOOLS=*` en el lanzador.
+
+Dos avisos que cuestan tiempo si se olvidan:
+
+- OpenCode manda los MCP **dentro de `execute`**, no como tools sueltas. Es decir,
+  `execute` es la puerta de todos los MCP: si se recorta, no hay Office aunque el
+  servidor esté conectado. Los lanzadores lo llevan; la lista por defecto del repo no
+  (decisión antigua, medida en el bench: sin `execute` el modelo escribe bloques de
+  shell).
+- El log del proxy ahora dice también lo que **quita**:
+  `OpenCode toolset: N/M kept — … | dropped — …`.
 
 Copias de seguridad del cambio: `opencode.jsonc.bak-20261111_1723` y
 `opencode.json.bak-20261111_1723`.
