@@ -5742,3 +5742,38 @@ our per-request shell framing already does, and the framing is the lever with ev
 (`docs/prompt-engineering.md`). Decision 2026-11-11: keep it out. If it is ever revisited, the
 cheap probe is `M365_SYSTEM_PROMPT=<file>` replacing only the harness prompt (framing and
 toolset kept), A/B'd with `scripts/bench/phase-sweep.sh --label`.
+
+## Nov 11 2026 - is there a server-side model catalogue? (WS: no; HTTP: open)
+
+**Hypothesis.** M365 tells the client which models the account may use. If so,
+`/v1/models` could list real entitlement instead of all 34 `MODEL_TONES` keys, and
+a fresh machine would need no hand-written model list.
+
+**Probe 1 (done, 1 turn).** `scripts/frame-dump-probe.mjs`, 2026-11-11: 9 frames,
+every key dumped (`scripts/frame-dump-out/2026-11-11T11-13-52-165Z`). Frame types
+1 (update), 2 (final item) and 3 (completion). Fields seen: `throttling`
+(600 max / 1 used), `nonce`, `requestId`, `messageId`, `scores`-bearing message
+metadata, `locationInfo.country = ES`, `messages[].turnCount`, `references`,
+`conversationTransferToken`. **No model, tone, license, scenario or tier field
+anywhere.** The chat hub does not send a catalogue on the path we use.
+
+**Caveat (declare-to-receive).** The probe ran agent-less `magic` on the included
+scenario. API doc §9 shows message types can be declared into existence, so a
+catalogue type could exist unrequested. Cheap follow-up: the same probe with
+`--allowed-extra` for catalogue-ish names, and with `scenario=OfficeWebPaidCopilot`.
+
+**Probe 2 (blocked on this host).** The other place it could live is the
+first-party web client: `scripts/models-catalog-hunt.mjs` signs in to
+m365.cloud.microsoft, opens the model picker and scans XHR/document bodies, the
+inline page HTML and localStorage/sessionStorage for model names. This host has no
+`secrets.json` and its Playwright profile is logged out (302 to
+login.microsoftonline), and the app shell is 302 as well, so the bundle cannot be
+mined anonymously either. **Run it where the credentials are** - the machine whose
+list is wrong.
+
+**Why it matters.** Entitlement is per account and today only surfaceable by
+*using* a model: `isPremiumOnlyModel` turns the `InternalError` into a 502,
+`noteAgentRouteAlive/Dead` learns the agent route, `priorityAccessExhaustionOf`
+learns the metered walls. A catalogue would turn that into a read. Without one, the
+fallback is passive and free: persist per `oid` what every real turn already
+teaches, which converges only on the models actually used.

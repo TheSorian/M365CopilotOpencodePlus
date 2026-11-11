@@ -180,6 +180,20 @@ de partida; el árbol estaba limpio, así que no se pierde nada) y arranca con l
 ya funcionaba. Si no hay red, avisa y sigue con lo compilado. Códigos de salida: `0` hay
 proxy que arrancar, `1` no lo hay (y el lanzador para en vez de arrancar a medias).
 
+## La lista de modelos que ves en OpenCode
+
+No la pone el proxy: `/v1/models` anuncia siempre las 34 claves de `MODEL_TONES`,
+porque el proxy no sabe qué cuenta tiene delante. La lista que sale en OpenCode es
+la del `models` del provider `m365` en `~/.config/opencode/opencode.jsonc`, y por eso
+cada equipo tiene la suya. Eso sobrevive a las actualizaciones; tocar `packages/`
+para filtrar, no: el arranque hace `git pull` y `pnpm build`, así que el parche se
+pierde o bloquea la actualización.
+
+Para saber qué modelos sirve de verdad una cuenta hacen falta turnos: el catálogo
+del servidor todavía no se ha encontrado (`docs/hypotheses.md`, "Nov 11 2026 - is
+there a server-side model catalogue?"). Mientras tanto, ante la duda, prueba el
+modelo una vez: si la cuenta no lo tiene, el proxy ya responde 502 diciéndolo.
+
 ## Por que no se pierden nuestros cambios
 
 - `NOTAS.md`, `start-m365.cmd`, `update-m365.cmd` y `scripts\update-upstream.ps1` /
