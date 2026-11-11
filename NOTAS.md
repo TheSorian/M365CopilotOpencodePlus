@@ -236,3 +236,34 @@ Si algún día quieres el original literal (nada del fork), probado que aplica l
 - Cuenta de empresa/centro educativo; las personales no valen.
 - En PowerShell usa `pnpm.cmd` (tu ExecutionPolicy bloquea `pnpm.ps1`).
 - API no documentada: puede romperse sin aviso. El uso es responsabilidad de tu cuenta.
+
+# Configuración global de OpenCode (MCPs, skills, plugins)
+
+A partir del 2026-11-11 todo lo que debe estar disponible **en cualquier carpeta**
+vive en la configuración global, no en `G:\local-AI\opencode.json`.
+
+| Qué | Dónde | Notas |
+|---|---|---|
+| MCPs (`web-search`, `playwright`, `cua-driver`, `OfficeMCP`) | `~/.config/opencode/opencode.jsonc` → `mcp.servers` | Forma V2: `type`, `command`, y `disabled` si hay que apagarlo. La forma antigua (`mcp.<nombre>` con `enabled`) no la lee OpenCode 2.0.24: `opencode mcp list` respondía "No MCP servers configured". |
+| Skills | `~/.config/opencode/skills/<id>/SKILL.md` | El skill `office` (officecli) estaba solo en `G:\local-AI\.opencode\skills`; ahora también global. El global tiene menos precedencia: el del proyecto sigue ganando si existe. |
+| Plugins | `~/.config/opencode/opencode.jsonc` → `plugins` | `@xirothedev/openoffice-p` (el que da `officecli`) ya estaba global. |
+| Agentes (`build`, `chat`, `desktop`, `plan`, `web`) | `~/.config/opencode/opencode.jsonc` → `agent` | Antes solo existían dentro de `G:\local-AI`. |
+| Modelos y providers | `~/.config/opencode/opencode.jsonc` → `providers` | `G:\local-AI\opencode.json` conserva su propia copia (idéntica salvo nombres de modelo). |
+
+Comprobar sin adivinar:
+
+    opencode mcp list          # ✓ connected por servidor; desde CUALQUIER carpeta
+
+Ojo: la primera ejecución tras abrir una carpeta nueva puede imprimir
+"No MCP servers configured" mientras arranca el servicio. Repetirlo a los pocos
+segundos; si sale `✓ ... connected`, está bien.
+
+**El recorte del proxy sigue mandando en lo que ve M365.** Que un MCP esté
+disponible en el cliente no significa que sus tools viajen en la petición: el proxy
+poda con `M365_OPENCODE_TOOLS`. Hoy la lista (en `start-m365.cmd` y
+`run_m365_proxy.bat`) lleva `officecli,OfficeMCP.*` y **no** lleva playwright ni
+cua-driver, así que esos 25+ tools no engordan el prompt (y no disparan Disengaged).
+
+Copias de seguridad del cambio: `opencode.jsonc.bak-20261111_1723` y
+`opencode.json.bak-20261111_1723`.
+
