@@ -5726,3 +5726,19 @@ it isn't"), and the framings no longer forbid asking the user to paste a file.
 **Open.** No live A/B yet (n=0): the account was 429 `PerUserThrottled` from the probes
 that produced the capture. Falsifier for the allowlist alone: `claude-sonnet` / `gpt-5.5` still
 give up on a tool task in a fresh opencode session while `execute`/`skill` are not offered.
+
+**Re-checked 2026-11-11 (Bertogim's own system prompt).** Bertogim's
+`packages/prompts/opencode-system.md` is now a from-scratch 100-line, 5,260-char "execution
+model" contract (one `bash` / `patch` / `question` block or plain text per response), and
+their `492bbde` retired their framing and turn reminder so that prompt carries the whole job.
+It remains **deliberately unported**. It is a different architecture: their
+`system-filter.ts` drops every `system`/`developer` message and substitutes that text, keeping
+only `Working directory`, `Platform` and `Is directory a git repo` from the harness `<env>`;
+this proxy passes the harness prompt through untouched and adapts only the toolset
+(`trimOpenCodeTools`). Bringing that prompt over therefore also means dropping the project's
+`AGENTS.md` prose and most of `<env>` - on Windows, the line that tells the model it has
+PowerShell, which is the very thing their `15aac72` had to add back. Their contract is the job
+our per-request shell framing already does, and the framing is the lever with evidence
+(`docs/prompt-engineering.md`). Decision 2026-11-11: keep it out. If it is ever revisited, the
+cheap probe is `M365_SYSTEM_PROMPT=<file>` replacing only the harness prompt (framing and
+toolset kept), A/B'd with `scripts/bench/phase-sweep.sh --label`.

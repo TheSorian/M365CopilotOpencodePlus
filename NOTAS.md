@@ -129,6 +129,11 @@ No crea tags: los hitos se etiquetan a mano, uno por versión buena:
 adoptarla; si sale roja (o hay conflicto) la borra y no se ha traído nada. `-Keep` la
 conserva para mirar el fallo.
 
+Su system prompt propio (`packages/prompts/opencode-system.md`) no se trae, y no es un olvido:
+sustituye el prompt del harness entero, mientras que aquí se pasa intacto y solo se recorta el
+toolset. Ya se probó reescribirlo y se revirtió (2026-10-29). El motivo y el experimento que
+haría falta para reabrirlo están en `docs/hypotheses.md`, "Re-checked 2026-11-11".
+
 Lo que de Bertogim sí se ha aprovechado se ha portado a mano, sin traer `packages/prompts/`:
 su `d521e68` (M365 repite la misma respuesta bajo otro `messageId`; el compositor la pliega en
 vez de duplicarla) y su `4b0da8d` (la respuesta doble llega a veces dentro de un solo mensaje:
