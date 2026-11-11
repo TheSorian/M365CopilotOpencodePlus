@@ -445,6 +445,11 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   /\bno\s+(?:puedo|podr[eé]|soy\s+capaz\s+de|me\s+es\s+posible)\s+(?:[a-záéíóúñ]+\s+){0,2}(?:ejecutar|correr|lanzar|acceder|leer|escribir|crear|modificar|editar|guardar|listar|abrir|inspeccionar|obtener|descargar|instalar|interactuar|usar|ver(?:l[oa]s?)?\b)/i,
   /\bno\s+puedo[\s\S]{0,80}\bdesde\s+aqu[ií]/i,                                                 // "no puedo ejecutarlos yo desde aquí"
   /\b(?:no\s+tengo|no\s+dispongo\s+de|no\s+cuento\s+con|carezco\s+de)\s+(?:ya\s+)?(?:acceso|permiso|capacidad|posibilidad|habilidad|herramientas?|consola|terminal)\b/i,
+  // An adverb slipped between the verb and the object, so the line above missed it:
+  // "No dispongo ahora de una herramienta activa para leer estos archivos" (2026-11-11,
+  // same OpenCode session as the trimmed-toolset give-up: the model had just claimed a
+  // background process was running and then could not read its own result files.
+  /\b(?:no\s+tengo|no\s+dispongo|no\s+cuento)\s+(?:ya|ahora|actualmente|en\s+este\s+momento)?\s*(?:de\s+)?(?:ninguna\s+|ning[úu]n\s+|una?\s+|la\s+|las\s+)?(?:herramienta|consola|terminal|acceso|permiso|capacidad|posibilidad)\b/i,
   /\bsin\s+acceso\s+(?:a|al|a\s+la|a\s+los|a\s+las)\b/i,
   /\b(?:he\s+perdido|ya\s+no\s+tengo)\s+(?:el\s+)?acceso\b/i,
   /\b(?:puedo|podr[ií]a|te\s+puedo)\s+(?:darte|ponerte|pasarte|proporcionarte|ofrecerte|prepararte|dejarte)\s+(?:los\s+|unas?\s+)?(?:comandos?|scripts?|instrucciones|pasos)\b/i,

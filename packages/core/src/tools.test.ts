@@ -373,6 +373,10 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("No puedo completar la edición del Word abierto en esta sesión porque el control de aplicaciones de escritorio no está disponible ahora mismo.")).toBe(true);
     expect(looksLikeConfabulation("En este turno no tengo disponible la herramienta de ejecución para lanzar PowerShell, así que no puedo realizar la modificación directamente ahora.")).toBe(true);
     expect(looksLikeConfabulation("La herramienta de ejecución no está disponible en esta sesión.")).toBe(true);
+    // Third live reply of that session: it had announced a background process and then
+    // could not read the two result files it had asked that process to write.
+    expect(looksLikeConfabulation("No dispongo ahora de una herramienta activa para leer estos archivos de resultado y verificar el cambio.")).toBe(true);
+    expect(looksLikeConfabulation("No tengo ahora ninguna herramienta para inspeccionar el documento.")).toBe(true);
   });
 
   it("does NOT flag a Spanish project summary that only describes the setup", () => {

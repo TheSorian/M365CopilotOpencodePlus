@@ -188,6 +188,11 @@ sandbox tools (3/7 vs relay 6/6, H25b), so `relay_batch` is plain relay when the
   MCP usable without pinning names that drift, and the give-up detectors are per-language
   — `CONFABULATION_PATTERNS` was thorough in English and Turkish and blind to the same
   sentence in Spanish (2026-11-11, real OpenCode session, gpt-5.6-think-deeper).
+  One more shape in that same session shows how narrow a pattern is: after announcing a
+  background process it could not read the result files it had asked it to write ("No
+  dispongo ahora de una herramienta activa para leer estos archivos"). `no dispongo de`
+  did not match because an adverb sat between the verb and `de`, so the pattern now allows
+  `ya|ahora|actualmente|en este momento` and an optional article there.
 - **Measure on *unfakeable* tasks.** The model hallucinates success on tasks it can answer
   from memory (fizzbuzz, count-lines) with 0 tool calls; only unfakeable tasks (fix-bug,
   find-needle, edit-config) force real calls. ([api §10 "measurement traps"].)
