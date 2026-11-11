@@ -58,7 +58,10 @@ goto fin
 :estado
 echo.
 echo === Trayendo referencias (solo lectura) ===
-git fetch --all --prune --quiet
+rem Solo los tres remotos vivos: 'local' apunta a un clon que puede no existir.
+git fetch --prune --quiet origin
+git fetch --prune --quiet upstream
+git fetch --prune --quiet bertogim
 echo.
 echo --- origin/main (nuestro repo; es lo que aplica el arranque) ---
 git log --oneline --no-decorate main..origin/main
