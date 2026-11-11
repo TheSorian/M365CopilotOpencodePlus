@@ -244,7 +244,7 @@ vive en la configuración global, no en `G:\local-AI\opencode.json`.
 
 | Qué | Dónde | Notas |
 |---|---|---|
-| MCPs (`web-search`, `playwright`, `cua-driver`, `OfficeMCP`) | `~/.config/opencode/opencode.jsonc` → `mcp.servers` | Forma V2: `type`, `command`, y `disabled` si hay que apagarlo. La forma antigua (`mcp.<nombre>` con `enabled`) no la lee OpenCode 2.0.24: `opencode mcp list` respondía "No MCP servers configured". |
+| MCPs (`web-search`, `playwright`, `cua-driver`, `OfficeMCP`) | `~/.config/opencode/opencode.jsonc` → `mcp.servers` | Forma V2: `type`, `command`, y `disabled` si hay que apagarlo. La forma antigua (`mcp.<nombre>` con `enabled`) el servidor sí la ejecuta —las tools de OfficeMCP respondían dentro de `G:\local-AI`—, pero `opencode mcp list` no la veía ("No MCP servers configured") y sobre todo no aplicaba fuera de esa carpeta. |
 | Skills | `~/.config/opencode/skills/<id>/SKILL.md` | El skill `office` (officecli) estaba solo en `G:\local-AI\.opencode\skills`; ahora también global. El global tiene menos precedencia: el del proyecto sigue ganando si existe. |
 | Plugins | `~/.config/opencode/opencode.jsonc` → `plugins` | `@xirothedev/openoffice-p` (el que da `officecli`) ya estaba global. |
 | Agentes (`build`, `chat`, `desktop`, `plan`, `web`) | `~/.config/opencode/opencode.jsonc` → `agent` | Antes solo existían dentro de `G:\local-AI`. |
