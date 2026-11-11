@@ -239,18 +239,20 @@ elseif ($pullDone) {
     if ($changed -contains "pnpm-lock.yaml") { $needInstall = $true }
 }
 
-# Solo docs/scripts/ficheros .md no entran en el build: si el unico cambio desde
-# el ultimo build es de esos, se avanza el sello sin recompilar (15 s de menos en
-# cada arranque tras un commit de documentacion).
+# Lista blanca de lo que entra en el build: si desde el ultimo build no ha
+# cambiado nada de esto (solo docs, scripts o los .cmd del arranque), se avanza
+# el sello sin recompilar. Ahorra ~15 s en cada arranque tras un commit de
+# documentacion, y sigue recompilando si toca cualquier cosa de packages/.
 function Test-BuildRelevant([string[]]$Paths) {
     foreach ($path in $Paths) {
         if (-not $path) { continue }
         $norm = $path -replace "\\", "/"
-        if ($norm -like "docs/*") { continue }
-        if ($norm -like "scripts/*") { continue }
-        if ($norm -like ".github/*") { continue }
-        if ($norm -like "*.md") { continue }
-        return $true
+        if ($norm -like "packages/*") { return $true }
+        if ($norm -eq "package.json") { return $true }
+        if ($norm -eq "pnpm-lock.yaml") { return $true }
+        if ($norm -eq "pnpm-workspace.yaml") { return $true }
+        if ($norm -eq "tsconfig.json") { return $true }
+        if ($norm -like "tsconfig.*.json") { return $true }
     }
     return $false
 }
@@ -275,7 +277,7 @@ if (-not $needBuild -and $built -ne $head) {
             $needBuild = $true
         }
         else {
-            Write-Info "desde $(Get-Short $built) solo cambian docs/scripts; no recompilo"
+            Write-Info "desde $(Get-Short $built) no cambia nada que entre en el build; no recompilo"
         }
     }
 }

@@ -159,10 +159,11 @@ Es lo mismo que hace el arranque, para lanzarlo a mano sin abrir el proxy:
 Solo hace fast-forward de `main` desde `origin/main`, y solo si el árbol está limpio (los
 ficheros sin seguimiento no cuentan: si el pull choca con uno, git aborta y se avisa).
 Después instala dependencias si cambió `pnpm-lock.yaml` o no hay `node_modules`, y compila
-si el HEAD no coincide con el sello `.git/m365-build-commit` (salvo que entre medias solo hayan
-cambiado docs, scripts o ficheros `.md`: entonces solo mueve el sello). Ese sello es lo que
-deja que un clon nuevo se instale y compile solo la primera vez, y que los arranques
-siguientes no recompilen por gusto.
+si el HEAD no coincide con el sello `.git/m365-build-commit`. Ese sello es lo que deja que un
+clon nuevo se instale y compile solo la primera vez, y que los arranques siguientes no
+recompilen por gusto. Si desde el último build solo han cambiado docs, scripts o los `.cmd`
+del arranque (nada de `packages/` ni los ficheros de build de la raíz), el sello avanza sin
+recompilar.
 
 Si el commit nuevo no compila, el script vuelve al anterior (`git reset --hard` del commit
 de partida; el árbol estaba limpio, así que no se pierde nada) y arranca con la versión que
