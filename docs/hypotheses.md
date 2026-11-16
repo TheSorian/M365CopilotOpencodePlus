@@ -5807,3 +5807,36 @@ is no evidence the refresh is ever forwarded; their matcher also requires
 **Falsification:** log the request bodies of one long session with `/mcps`
 toggling, and see whether a `<system-update>`-wrapped user message ever appears in
 a `Formatted prompt`. If it does, strip it; if not, drop the idea.
+
+### The one prompt rule we took, and the four we did not
+
+Reviewed their `packages/prompts/opencode-system.md` (143 lines) line by line, after
+deciding not to adopt its architecture. Eight of its twelve rules already exist
+here — one block per turn, the `*** Begin Patch` format, the `question` array
+shape, "use confirmed paths", evidence before claiming a result. Of the four that
+were missing, three were dropped on evidence or on redundancy:
+
+- **No backups unless high-risk** — contradicted by our own skill: `word-open-file`
+  says "back up first", and the only `_backup_` file in 15.4 MB of proxy log came
+  from that instruction.
+- **No `echo`/`printf` narration** — 0 occurrences of `echo "` in the same log.
+  The model does not do it on this path.
+- **Interpret exit codes; empty is not failure** — already enforced in code rather
+  than in prose: the confabulation guard matches `returning no output`,
+  `no output was returned`, `unable to access|inspect|read…` and retries the turn.
+  A sentence in the prompt would be the weaker copy of a working guard.
+
+The fourth was taken, as one calm sentence in `harnessNotes` so that it rides with
+every framing variant (gated on the shell, since establishing "was it already
+failing" means running something): a red check is not by itself proof the model
+broke it — establish whether it failed the same way before the change.
+
+**Prediction corrected.** The motivating example was going to be this repo, on the
+belief that `pnpm test` exits 1 on warnings while every test passes. Measured:
+it exits **0** (18 files passed, 1 skipped; 500 tests passed, 6 skipped). So the
+rule rests on the general shape — projects that start red — not on a local case.
+
+**Unbenched.** One sentence is not a framing change, but it is still text on every
+tool turn. If a sweep is ever run: `--label preexisting` against the current
+default, and the signal is turns per task on tasks whose sandbox starts red.
+

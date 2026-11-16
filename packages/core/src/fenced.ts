@@ -585,6 +585,14 @@ function harnessNotes(tools: ToolDef[]): string {
     notes.push(
       `There is always a real shell here (\`${shell.function.name}\`). Every \`\`\`bash block you write runs against the real files in the working directory and its output comes back to you as a <tool_response>. Look at the files with commands instead of assuming what they contain, and if a file really isn't there, ask me to paste it rather than inventing its contents.`,
     );
+    // A red check was often red before the change: projects start with failing tests
+    // they already know about, so the first red result reads as the model's own
+    // regression and costs turns chasing a failure it did not cause. Gated on the
+    // shell, because establishing "was it already failing" means running something.
+    // Taken from Bertogim's opencode-system.md; unbenched.
+    notes.push(
+      `A check can already be failing before you touch anything: a red test, build or lint run is not by itself proof that your change broke it. When one fails, establish whether it failed the same way before your change — on the previous commit, or before you edited the file — instead of spending turns chasing a failure that was already there, and say plainly when it was.`,
+    );
   }
 
   if (patch) {

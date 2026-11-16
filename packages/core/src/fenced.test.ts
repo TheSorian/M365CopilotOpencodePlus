@@ -622,6 +622,15 @@ describe("harness notes (integrated, no OpenCode plugin)", () => {
     expect(out).not.toContain("if a shell is available");
   });
 
+  it("warns that a failing check may have been failing already", () => {
+    const withShell = formatFencedToolDefinitions([bash, readFile], "baseline");
+    expect(withShell).toContain("already be failing before you touch anything");
+    // Establishing "was it already failing" means running something, so the note
+    // never rides along without a shell.
+    const withoutShell = formatFencedToolDefinitions([readFile], "baseline");
+    expect(withoutShell).not.toContain("already be failing");
+  });
+
   it("teaches the patchText markers when the harness offers apply_patch", () => {
     const out = formatFencedToolDefinitions([bash, applyPatch], "relay_batch");
     expect(out).toContain("`apply_patch`");
