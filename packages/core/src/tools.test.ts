@@ -1012,3 +1012,110 @@ When you create a worktree outside the current working directory, consider using
     }
   });
 });
+
+describe("fence scanning around backticks", () => {
+  const shellTool = [{
+    type: "function" as const,
+    function: { name: "bash", description: "run", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
+  }];
+  const patchTool = [{
+    type: "function" as const,
+    function: { name: "patch", description: "apply a patch", parameters: { type: "object", properties: { patch: { type: "string" } }, required: ["patch"] } },
+  }];
+
+  // Prose that ends in a literal ```. used to open a fence called ".", which made
+  // the real block after it nested and lost: the model's turn became prose.
+  it("does not open a fence on prose ending in a literal ```.", () => {
+    const reply = "El archivo termina sin cierre ```.\n\n```bash\nls -la\n```";
+    const parsed = parseToolCalls(reply, shellTool);
+    expect(parsed.toolCalls).toHaveLength(1);
+    expect(JSON.parse(parsed.toolCalls[0].function.arguments).command).toBe("ls -la");
+  });
+
+  // A patch that adds Markdown code keeps `+```sh` and `+``` as body lines; the
+  // close-shaped one used to end the outer fence, cutting the patch in half.
+  it("keeps the Markdown fences a patch adds, and its end marker", () => {
+    const reply =
+      "```patch\n*** Begin Patch\n*** Update File: README.md\n@@\n"
+      + "+```sh\n+pnpm build\n+````\n*** End Patch\n```";
+    const parsed = parseToolCalls(reply, patchTool);
+    expect(parsed.toolCalls).toHaveLength(1);
+    const patch = JSON.parse(parsed.toolCalls[0].function.arguments).patch;
+    expect(patch).toContain("+pnpm build");
+    expect(patch).toContain("*** End Patch");
+  });
+
+  // The body was complete; only the closing marker and the outer fence were left
+  // out. Dropping the turn wastes the whole patch.
+  it("recovers a patch that never closed, completing its end marker", () => {
+    const reply = "```patch\n*** Begin Patch\n*** Add File: a.txt\n+hola\n";
+    const parsed = parseToolCalls(reply, patchTool);
+    expect(parsed.toolCalls).toHaveLength(1);
+    const patch = JSON.parse(parsed.toolCalls[0].function.arguments).patch;
+    expect(patch).toContain("+hola");
+    expect(patch).toContain("*** End Patch");
+  });
+
+  // Only a patch carries its own end marker. A truncated command may be
+  // dangerously incomplete, so it stays dropped.
+  it("still drops an unterminated shell command", () => {
+    expect(parseToolCalls("```bash\nrm -rf build", shellTool).toolCalls).toHaveLength(0);
+  });
+});
+
+describe("a question call wrapped in XML instead of a fence", () => {
+  const questionTool = [{
+    type: "function" as const,
+    function: { name: "question", description: "ask", parameters: { type: "object", properties: { questions: { type: "array" } } } },
+  }];
+
+  it("reads <question>{...}</question> as the question call", () => {
+    const parsed = parseToolCalls('<question>{"questions":[{"question":"¿Qué color?"}]}</question>', questionTool);
+    expect(parsed.toolCalls).toHaveLength(1);
+    expect(parsed.toolCalls[0].function.name).toBe("question");
+    expect(JSON.parse(parsed.toolCalls[0].function.arguments).questions).toHaveLength(1);
+  });
+
+  it("accepts a bare array inside the wrapper", () => {
+    const parsed = parseToolCalls('<questions>[{"question":"¿Cuál?"}]</questions>', questionTool);
+    expect(JSON.parse(parsed.toolCalls[0].function.arguments).questions).toHaveLength(1);
+  });
+
+  it("leaves an XML example in prose alone", () => {
+    const reply = 'Escribe algo así:\n\n<question>{"questions":[{"question":"¿Qué color?"}]}</question>\n\nY ya está.';
+    expect(parseToolCalls(reply, questionTool).toolCalls).toHaveLength(0);
+  });
+
+  it("does not invent a question call when the harness has no question tool", () => {
+    expect(parseToolCalls('<question>{"questions":[{"question":"¿Qué color?"}]}</question>', []).toolCalls).toHaveLength(0);
+  });
+});
+
+describe("a call the model rewrites after replaying its whole preamble", () => {
+  const bashTool = [{
+    type: "function" as const,
+    function: { name: "bash", description: "run", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
+  }];
+  const PREAMBLE = "Voy a listar los archivos del proyecto para entender la estructura antes de tocar nada, y luego decidiremos con calma.";
+  // 15 tokens, one of them changed: a revision that clears the similarity bar.
+  const CMD1 = "ls -la src docs scripts tests bench packages/proxy packages/core README.md package.json pnpm-workspace.yaml tsconfig.json eslint.config.js node_modules";
+  const CMD2 = CMD1.replace("node_modules", "dist");
+
+  it("runs the revised copy alone, though nothing apologises", () => {
+    const reply = `${PREAMBLE}\n\n\`\`\`bash\n${CMD1}\n\`\`\`\n\n${PREAMBLE}\n\n\`\`\`bash\n${CMD2}\n\`\`\``;
+    const parsed = parseToolCalls(reply, bashTool);
+    expect(parsed.toolCalls).toHaveLength(1);
+    expect(JSON.parse(parsed.toolCalls[0].function.arguments).command).toBe(CMD2);
+  });
+
+  it("keeps two calls when the replay introduces a different command", () => {
+    const other = "rm -rf node_modules && pnpm install --frozen-lockfile; echo listo";
+    const reply = `${PREAMBLE}\n\n\`\`\`bash\n${CMD1}\n\`\`\`\n\n${PREAMBLE}\n\n\`\`\`bash\n${other}\n\`\`\``;
+    expect(parseToolCalls(reply, bashTool).toolCalls).toHaveLength(2);
+  });
+
+  it("keeps two calls when a short lead-in is repeated instead of a real preamble", () => {
+    const reply = `Then:\n\n\`\`\`bash\n${CMD1}\n\`\`\`\n\nThen:\n\n\`\`\`bash\n${CMD2}\n\`\`\``;
+    expect(parseToolCalls(reply, bashTool).toolCalls).toHaveLength(2);
+  });
+});

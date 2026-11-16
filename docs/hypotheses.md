@@ -5777,3 +5777,33 @@ list is wrong.
 learns the metered walls. A catalogue would turn that into a read. Without one, the
 fallback is passive and free: persist per `oid` what every real turn already
 teaches, which converges only on the models actually used.
+
+## Parsing: what Bertogim's November commits taught us (2026-11-16)
+
+Reviewed their `10dc1ad` (10 Nov) and `309310c` (15 Nov) because both touch
+`fenced.ts` / `tools.ts`, the files our tool-calling lives in. Five parsing cases
+were reproduced against **our** build first; all five failed, and all five are now
+ported with their own tests (`tools.test.ts`, 83 → 94 tests):
+
+| Case | Our behaviour before | Why it matters |
+|---|---|---|
+| Prose ending in a literal ```` ```. ```` | opened a fence named `.`, the real ```` ```bash ```` after it nested and disappeared | the turn became prose, no tool ran |
+| Patch that adds Markdown fences | `+```` matched the glued-close shape and cut the patch in half | the patch marker was lost, apply failed |
+| Patch with no `*** End Patch` / no closing fence | dropped entirely | a complete body was thrown away |
+| `<question>{…}</question>` instead of a fence | no call | the model's question never reached the user |
+| Whole preamble replayed, then a slightly revised call | two calls, one-call-per-turn ran the stale first copy | the revision never ran, with no apology to signal it |
+
+**Not ported, on purpose.** Their prompt architecture (`packages/prompts/`,
+`system-filter.ts`, `applySystemPrompt` owning the system message) — it replaces
+the harness prompt instead of passing it through, which costs `AGENTS.md` and
+`<env>`. And `stripOpenCodeCodeModeUpdates` (10dc1ad): it removes user-role
+"Code Mode tool catalog has changed" messages before fingerprinting and formatting.
+
+**H6x — do those catalogue updates ever reach M365?** Unverified. Grepping the
+proxy's own log for `catalog` returns **0 lines** across the current file, so there
+is no evidence the refresh is ever forwarded; their matcher also requires
+`The catalog is complete. Do not guess tool names.`, while our capture says
+`The catalog is partial …`, so it would not match our version as written.
+**Falsification:** log the request bodies of one long session with `/mcps`
+toggling, and see whether a `<system-update>`-wrapped user message ever appears in
+a `Formatted prompt`. If it does, strip it; if not, drop the idea.

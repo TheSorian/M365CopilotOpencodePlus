@@ -982,8 +982,17 @@ const FENCE_CLOSE = /^[ \t]*```[ \t]*$/;
 // prose then an opener on one line ("Running it: ```bash"), and a closer glued
 // to the last line of the body ("ls -la```"). Only honoured at the outermost
 // level, where they can't be mistaken for nesting.
-const FENCE_OPEN_MIDLINE = /```([A-Za-z0-9_.-]+)[ \t]*$/;
+// A mid-line opener must start like a real language/tool name. Without that,
+// prose ending in a literal sequence such as "sin cierre ```." opened a fence
+// called `.`, and the real ```bash block after it became nested and vanished
+// from tool parsing.
+const FENCE_OPEN_MIDLINE = /```([A-Za-z0-9_][A-Za-z0-9_.-]*)[ \t]*$/;
 const FENCE_CLOSE_GLUED = /\S```[ \t]*$/;
+// Inside a patch, Markdown fences appear as added/deleted lines: `+```sh`
+// opens one and ``+``` `` / ``+```` `` closes it. The latter also matches the
+// glued-close shape above, but it belongs to the patch body rather than to the
+// outer ```patch fence.
+const DIFF_MARKED_FENCE = /^[+-]```[ \t]*$/;
 
 interface FenceBlock {
   info: string;
@@ -1032,7 +1041,12 @@ function scanFences(text: string): FenceBlock[] {
       }
     } else if (opener) {
       depth++;
-    } else if (depth === 1 && open && FENCE_CLOSE_GLUED.test(line)) {
+    } else if (
+      depth === 1 &&
+      open &&
+      FENCE_CLOSE_GLUED.test(line) &&
+      !DIFF_MARKED_FENCE.test(line)
+    ) {
       const inner = text.slice(open.bodyStart, offset + line.trimEnd().length - 3);
       blocks.push({ info: open.info, inner, start: open.start, end: lineEnd });
       open = null;
@@ -1113,8 +1127,14 @@ function findUnclosedToolFence(
   const tail = text.slice(bodyStart);
   if (tail.includes("```")) return null; // closed: scanFences' case
   const inner = stripNativeCloser(tail, last[1]);
-  if (inner === null) return null; // no end marker: maybe a truncated reply
-  return { start: last.index, end: text.length, spec, inner };
+  // A patch is recoverable from its own unambiguous opening marker: models
+  // finish the body and omit `*** End Patch`, the closing fence, or both. Every
+  // other tool still needs a real closer, because a truncated command or file
+  // body may be dangerously incomplete. parseFencedInner restores the marker.
+  if (inner === null && !(PATCH_TOOL_NAME.test(spec.name) && hasPatchBeginning(tail))) {
+    return null; // no end marker: maybe a truncated reply
+  }
+  return { start: last.index, end: text.length, spec, inner: inner ?? tail };
 }
 
 function makeCall(name: string, args: Record<string, unknown>): ParsedToolCall {
@@ -1364,8 +1384,21 @@ function headerTextValue(inline: string, more: string[]): string {
   return [inline, ...rows].join("\n");
 }
 
+/** The markers that say a patch body is complete enough to run. */
+const PATCH_BEGIN = /^[ \t]*\*\*\* Begin Patch[ \t]*$/m;
+const PATCH_END = /^[ \t]*\*\*\* End Patch[ \t]*$/m;
+
+function hasPatchBeginning(inner: string): boolean {
+  return PATCH_BEGIN.test(inner);
+}
+
 /** Parse the inner text of one fenced block into an arguments object, schema-aware. */
 function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, unknown> | null {
+  // The model often sends a whole patch but leaves the closing marker out. The
+  // body came out complete, so run it instead of throwing the turn away.
+  if (PATCH_TOOL_NAME.test(spec.name) && PATCH_BEGIN.test(inner) && !PATCH_END.test(inner)) {
+    inner = `${inner.trimEnd()}\n*** End Patch`;
+  }
   const lines = inner.split("\n");
   const args: Record<string, unknown> = {};
 
@@ -1474,9 +1507,13 @@ export interface FencedParseResult {
 // it: same tool, nearly the same arguments (token Jaccard ≥ 0.85), a short gap
 // between them, and a sign it is a correction (the first copy carried native
 // markup, or the gap says so). Different commands, or the same one without
-// such a sign, stay two calls.
+// such a sign, stay two calls. M365 also replays the entire preamble before a
+// slightly revised call; repeating a substantial preamble verbatim is a sign
+// of its own, and it is how a long patch gets corrected without the model ever
+// saying so.
 const RESTATED_SIMILARITY = 0.85;
 const RESTATEMENT_GAP_CHARS = 300;
+const RESTATEMENT_PREAMBLE_MIN = 40;
 const CORRECTION_WORDS = /\b(?:oops|sorry|apolog\w*|mistake|typo|wrong|malformed|broken|incorrect\w*|corrected|correctly|fixed|same command|re-?formatted|properly formatted|try(?:ing)? again|let me redo)\b/i;
 
 interface ToolFence {
@@ -1493,9 +1530,28 @@ function argTokens(args: Record<string, unknown>): Set<string> {
   return new Set(text.split(/\s+/).filter(Boolean));
 }
 
-function restates(prev: ToolFence, next: ToolFence, gap: string): boolean {
-  if (prev.name !== next.name || gap.trim().length > RESTATEMENT_GAP_CHARS) return false;
-  if (!prev.hadNativeCloser && !CORRECTION_WORDS.test(gap)) return false;
+function normalizedProse(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+/** Did the model replay the whole preamble before the second call? A brief
+ *  lead-in such as "Then:" is too weak a signal; a substantial preamble
+ *  repeated verbatim is not. */
+function repeatsWholePreamble(text: string, prev: ToolFence, next: ToolFence): boolean {
+  const preamble = normalizedProse(text.slice(0, prev.start));
+  const repeated = normalizedProse(text.slice(prev.end, next.start));
+  return preamble.length >= RESTATEMENT_PREAMBLE_MIN && repeated === preamble;
+}
+
+function restates(
+  prev: ToolFence,
+  next: ToolFence,
+  gap: string,
+  repeatedPreamble: boolean,
+): boolean {
+  if (prev.name !== next.name) return false;
+  if (!repeatedPreamble && gap.trim().length > RESTATEMENT_GAP_CHARS) return false;
+  if (!prev.hadNativeCloser && !CORRECTION_WORDS.test(gap) && !repeatedPreamble) return false;
   const a = argTokens(prev.args);
   const b = argTokens(next.args);
   const shared = [...a].filter((t) => b.has(t)).length;
@@ -1537,7 +1593,10 @@ function toolFences(text: string, specs: Map<string, FencedToolSpec>): ToolFence
     if (!args) continue;
     const fence: ToolFence = { start: block.start, end: block.end, name: spec.name, args, hadNativeCloser: stripped !== null };
     const prev = fences[fences.length - 1];
-    if (prev && restates(prev, fence, text.slice(prev.end, fence.start))) {
+    if (
+      prev &&
+      restates(prev, fence, text.slice(prev.end, fence.start), repeatsWholePreamble(text, prev, fence))
+    ) {
       log.info(`Restated ${spec.name} call: running the corrected copy, not the first`);
       fences[fences.length - 1] = { ...fence, start: prev.start };
       continue;
