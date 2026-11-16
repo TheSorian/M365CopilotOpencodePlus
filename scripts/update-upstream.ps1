@@ -126,7 +126,10 @@ try {
         exit 1
     }
 
-    $null = git fetch --prune --quiet $Remote
+    # --no-tags: a upstream le han movido una etiqueta (v0.2.0) y el fetch normal
+    # muere con "would clobber existing tag", que aqui se leeria como "no hay red".
+    # Los hitos se etiquetan a mano (stable-AAAA-MM-DD), no dependemos de sus tags.
+    $null = git fetch --prune --quiet --no-tags $Remote
     Assert-LastExit "no se pudo contactar con el remoto '$Remote' (revisa: git remote -v)"
 
     # Se captura primero y se comprueba despues: cerrar el pipe antes de tiempo

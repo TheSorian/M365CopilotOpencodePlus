@@ -125,7 +125,7 @@ try {
         Write-Note "no se pudo traer origin/$MainBranch; sigo con el main local"
     }
 
-    $null = git fetch --prune --quiet $Remote
+    $null = git fetch --prune --quiet --no-tags $Remote
     Assert-LastExit "no se pudo contactar con el remoto '$Remote' (revisa: git remote -v)"
 
     # Se captura primero y se comprueba despues: cerrar el pipe antes de tiempo

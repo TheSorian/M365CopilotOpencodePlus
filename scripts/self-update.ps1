@@ -161,7 +161,7 @@ Write-Info "repo: $repo"
 Write-Info "rama: $current ($(Get-Short $head))"
 
 if ($Check) {
-    $null = Invoke-Git fetch "--prune" "--quiet" $Remote $Branch
+    $null = Invoke-Git fetch "--prune" "--quiet" "--no-tags" $Remote $Branch
     $count = Invoke-Git rev-list "--count" "HEAD..$Remote/$Branch"
     if ($count.Code -eq 0) {
         $behind = [int]$count.Lines[0]
@@ -187,7 +187,7 @@ elseif ($dirty.Count -gt 0) {
     $why = "hay $($dirty.Count) fichero(s) sin commitear; no actualizo encima de trabajo a medias"
 }
 else {
-    $fetch = Invoke-Git fetch "--prune" "--quiet" $Remote $Branch
+    $fetch = Invoke-Git fetch "--prune" "--quiet" "--no-tags" $Remote $Branch
     if ($fetch.Code -ne 0) {
         $why = "no se pudo contactar con $Remote (sin red?); sigo con lo compilado"
     }
