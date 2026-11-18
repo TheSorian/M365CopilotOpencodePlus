@@ -310,6 +310,28 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - **A turn can hold several bot messages; assemble text per message.** Each new message's head
   arrives only as a snapshot with a `cursor`; folding everything into one string drops it (it ate
   a fence's backticks). `TurnTextComposer` in `session.ts` — don't "simplify" it away. #29.
+- **A second transport exists: `M365_TRANSPORT=streamhub`.** The new web client
+  (`copilot.cloud.microsoft`) talks to `wss://substrate.svc.cloud.microsoft/m365Copilot/StreamHub/…` — same
+  SignalR JSON and Sydney token, but the chat goes up as a `chat_request` item and the answer comes back as
+  `message_part` items. Four details each broke a live turn first: `variants` must include `streamhub11`
+  (nothing ends the turn without it), a cursor frame **restates** its message (so it replaces, not extends:
+  `TurnTextComposer.restart`), a re-subscribe **replays** earlier turns (`request_end` included, so items are
+  filtered by `requestId`), and every fresh socket subscribes with `action: "create"`. StreamHub carries no
+  declarative agent and runs under `scenario=officeweb` for every model, which is how it serves models this
+  account's Chathub refuses. API doc §13, hypotheses §40 F106/F107.
+- **A tone can go over its input limit because the agent-less turn carries Bing.** `GPT-6` and
+  `GPT-5.5 Think Deeper` refused a one-line prompt with `InvalidRequest` / `InputTokenLimitExceeded` with
+  the plugin attached and served it without. The handler re-sends such a refusal once, without
+  `BingWebSearch`, in a fresh conversation, and the tone keeps it off for the process
+  (`noteWebSearchOverflow`); a refusal with no Bing left is a real limit and 400s as before. Hypotheses §40
+  F108.
+- **M365's post-processing deletes `[word]:` from a reply's final text** — code blocks included, and not
+  every occurrence (`[regex]::Replace(` arrives as `:Replace(`, a Python `-> list[Item]:` loses the token
+  and the line after it). The token deltas carry the model's own text, so the composer restores from them
+  (`restoreStrippedBrackets`, `finalText`, `settleAnswer`); a short reply may have no deltas, so a PowerShell
+  call still holding `:Member(` is not run — the handler asks once for full dotted type names, then 502s
+  `damaged_tool_call`. Don't "simplify" that into one path. Hypotheses §40 F111.
+
 - **A conversation is keyed on the first user message *and* the tool names** (`SessionPool.fingerprint`).
   opencode's title request shares the task's opener but has no tools; keyed on the opener alone it ran in
   the task's M365 conversation, concurrently (#83). Don't add the system prompt or tool descriptions to

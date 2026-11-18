@@ -5925,3 +5925,119 @@ tiny PDF as a `file` part and read the debug log for `Uploaded … → <id>`; a 
 `File upload failed: …` plus the note in the turn's text. Falsification: no token → the feature
 degrades to that note on every turn, and the one-line fix is the Graph scope in the login request.
 `attachmentUrls` itself is pure and tested; only the token half is unmeasured.
+
+## 40. Nov 11 2026 — StreamHub, the new web client's transport
+
+Ported from upstream's `d48c26c`-era chain (`39332c5`, `bc13a55`, `fc998f4`, `cdf4297`): the
+measurements below are theirs, on their premium account; our live rerun is H40d/H41.
+
+The web app (`copilot.cloud.microsoft`) has three surfaces: Chat, Cowork and Code. Chat runs on a new
+WebSocket endpoint, **StreamHub**; Cowork and Code on a separate agent runtime.
+
+### F106 — StreamHub takes the proxy's Sydney token 🟢
+`wss://substrate.svc.cloud.microsoft/m365Copilot/StreamHub/{oid}@{tid}` speaks Chathub's SignalR JSON,
+but a turn is a `chat_request` item on a client stream and the answer `message_part` items on a server
+stream (API doc §13). A probe with the proxy's own token, one prompt per tone, agent-less, scenario
+`officeweb`: `Gpt_61_Sol_Reasoning`, `Gpt_6_Reasoning` and `Claude_Opus` ("Claude Opus 5.5") all
+answered. The proxy now has a StreamHub transport (`session.ts`), used for every model under
+`M365_TRANSPORT=streamhub`, and it carries no declarative agent.
+
+### F107 — four protocol details the probe didn't show 🟢
+Each one broke a live proxy turn before it was handled:
+1. **`variants` must include `streamhub11`.** With the proxy's Chathub flags the answer streamed, then
+   nothing: no `request_end`, only pings until the client gave up (240 s). `streamhub11` alone brings
+   `request_start` … `request_end` back. A 5 s close after the `EndOfRequest` message is the safety net.
+2. **A long answer is sent twice.** Deltas (`{w}`, Chathub's `writeAtCursor`) carried 1,264 characters;
+   then a second cursor frame restated the message as `""` and one delta carried all 1,531. Chathub's
+   keep-the-longest fold would have glued them together, so a cursor frame now replaces its message.
+3. **Re-subscribing replays the conversation.** Turn 2 "answered" instantly with turn 1's text: the
+   subscribe replayed turn 1's items, its `request_end` included. Items are now filtered by `requestId`.
+4. **Every fresh socket subscribes with `action: "create"`.** Without it turn 2 got no reply at all. The
+   web client, resuming a conversation after a reload, sends `create` too (capture). With all four,
+   `gpt-6.1-sol` recalled a code word across turns.
+
+An unknown tone is rejected with an `error` item (`InvalidRequest` / `InvalidNote`) and no
+`request_end`; the server then holds the socket for ~120 s, so the proxy closes it.
+
+### F108 — F105's refusals: the scenario and the Bing plugin, not the account 🟢 (upstream probes, n=1 each)
+Upstream's F105 read `InputTokenLimitExceeded` on a 46-character prompt as a dead tone. It is two causes:
+
+| tone | Chathub, its scenario (F105) | StreamHub, `OfficeWebIncludedCopilot` | Chathub, `officeweb` | StreamHub, `officeweb`, Bing | StreamHub, `officeweb`, no Bing |
+|---|---|---|---|---|---|
+| `Gpt_61_Sol_Reasoning` | refused | refused | answers | answers | answers |
+| `Gpt_6_Sol_Reasoning` | refused | – | – | answers | answers |
+| `Gpt_6_Reasoning` | refused (paid) | – | refused, with Bing | refused | answers |
+| `Gpt_5_5_Reasoning` | refused | – | – | refused | answers |
+
+On StreamHub the refusal arrives as `request_end` with `outcome: {category: "InvalidRequest", code:
+"InputTokenLimitExceeded"}`, after an apology message. The web client sends the Bing plugin too, so
+GPT-6 presumably fails there the same way. The proxy learns the Bing case at runtime: a refused
+agent-less request is re-sent once without the plugin in a fresh conversation, and the tone keeps it
+off for the process (`noteWebSearchOverflow`). Upstream, `gpt-6-think-deeper` and
+`gpt-5.5-think-deeper` then answered. **Unmeasured here.**
+
+StreamHub turns use `officeweb` for every model; `licenseType` changed nothing (`Claude_Sonnet` was
+Sonnet 5.5 under `officeweb` with `Starter` and with `Premium`), while the included scenario made it
+"Sonnet 5".
+
+### F111 — M365 deletes `[word]:` from the final text; in Codex on Windows that emptied files 🟢
+A Codex pressure test over StreamHub (a user-voice brief, seven harness-check tasks with a Node
+verifier, twice each) solved 10/14. All four failures were in-place edits (`edit-config`, `ec-notes`),
+and each left the edited file **empty**. The model wrote `$updated = [regex]::Replace($content, …)`;
+Codex received `$updated = :Replace($content, …)`. PowerShell rejected the call, `$updated` stayed
+empty, and the `Set-Content` after it wrote nothing over the file.
+
+M365's post-processing deletes a bracketed word, the colon after it and the whitespace after that from a
+message's **final** text, code blocks included. One probe over StreamHub, asked to echo:
+
+| sent | final text |
+|---|---|
+| `[int]::Parse('5')`, `[Regex]::Escape('x')` | `:Parse('5')`, `:Escape('x')` |
+| `if row[col]: pass` | `if rowpass` |
+| `const o = {[key]: 1};` | `const o = {1};` |
+| `[a_b]: c`, `[1]: footnote`, `x = d[k]:y`, `[regex]:Escape` | `c`, `footnote`, `x = dy`, `Escape` |
+| `[IO.File]::Exists('a')`, `[regex] ::Escape('x')`, `[int]'42'`, `$arr[0]`, `[docs]` | unchanged |
+
+Not every occurrence: a 4.6k-character answer lost 6 of its 8. Chathub does the same with GPT-5.6
+Think Deeper and Sonnet 5, so it predates StreamHub; `streamingMode` makes no difference. The
+**deltas** carry the model's own text; a short reply often has none and arrives only as the final
+snapshot — which is exactly the case our own composer got wrong (see the correction to the prior
+below).
+
+The proxy handles it in three layers, all ported (`fc998f4`):
+1. **Restore** (`restoreStrippedBrackets`, both transports): each message's longest delta-built text is
+   aligned with its final text, allowing only these deletions; the result is the model's text plus any
+   tail only the final carried, and the client gets that tail streamed.
+2. **Prevent:** the Windows PowerShell host note asks for full dotted .NET type names
+   (`[System.Text.RegularExpressions.Regex]::Replace`) or `-replace`/`-match`.
+3. **Guard:** a PowerShell tool call that still contains `:Member(` — no PowerShell syntax has it — isn't
+   run. The proxy asks once for the command with full type names; damaged again, it fails closed (502
+   `damaged_tool_call`).
+
+Upstream, the two failing tasks then went 6/6 at 2 turns each (from 0/4). Layer 1 fired in a depth
+test: the model's Python rewrite of `store.py` had `def items(self) -> list[Item]:` and
+`-> list[str]:`, and the final snapshot read
+`def items(self) -> listreturn list(self._items.values())`; the deltas had the whole text, and the
+proxy sent that. Modern Python type hints hit this all the time.
+
+### H40b — the tool agent over StreamHub
+Untested: the proxy sends StreamHub turns agent-less (`gpts` carries only the built-in scenario). The
+agent would ride in `gpts` with its MOS3 id, as on Chathub. **Probe:** send one tool turn with the
+agent id in `gpts` and see whether a fence comes back.
+
+### H40d — outside PowerShell, the deletion costs a syntax error, not silent damage
+`-> list[str]:` or `if x[k]:` lose the token and the line break after them, which a harness reports.
+**Probe:** count Python/JS syntax errors right after a short write in real sessions; if they're
+frequent, extend the guard beyond PowerShell.
+
+### H40e — the `[word]:` restore on our host
+Their rate was 4 of 4 in-place PowerShell edits on Codex/Windows; our pi host runs Git Bash (POSIX), so
+the case we would see is the Python one above. The debug log prints "Restored text M365 stripped…"
+whenever the restore fires, so a hit shows up without diffing anything. **Probe:** one
+`scripts/bracket-strip-probe.mjs` run when the account serves turns again.
+
+### H41 — the Bing plugin on our account
+The fallback (a refusal re-sent once without `BingWebSearch`) is ported and unit-tested, never fired
+here: this account has not yet refused an agent-less prompt because of the plugin. **Probe:** ask
+`gpt-6-think-deeper` for a one-line prompt and read the log for "refused the prompt with the Bing
+plugin attached".
