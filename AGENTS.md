@@ -351,6 +351,18 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - The `nativeclient` OAuth redirect bounces to `/common/wrongplace`; the auth code is
   scraped from the navigation request, not a settled URL.
 
+- **The proxy listens on localhost only and refuses foreign browser origins** (#93, ported
+  from upstream `9bba755` without its optional API key). `bin/m365-proxy.mjs` sets
+  `NITRO_HOST=127.0.0.1` unless `HOST`/`NITRO_HOST` is already set — `HOST=0.0.0.0` opts back
+  in, and until it did, every machine on the LAN and any web page in the browser could spend
+  the signed-in M365 account. `packages/proxy-lib/src/access.ts` reads the `Origin` header: no
+  header (every CLI harness) and desktop origins (`localhost`, `127.0.0.1`, `[::1]`,
+  `tauri://…`, other custom schemes) pass; anything else is a 403, and `Origin: null` is
+  refused on purpose because that is what a sandboxed iframe on a malicious page sends.
+  `M365_CORS_ORIGIN` takes a comma-separated list or `*`. Note CORS alone could not have fixed
+  this: a page that rebinds its DNS to 127.0.0.1 is *same-origin* to the browser, so the
+  refusal has to be made server-side, on the header — not delegated to the browser.
+
 ## Verifying changes end-to-end
 
 ```sh

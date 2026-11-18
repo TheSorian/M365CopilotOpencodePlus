@@ -55,16 +55,16 @@ export function buildModelsPayload() {
   };
 }
 
-// --- CORS (permissive, matches the previous Hono `cors()` default) ---
+// --- Access policy (#93) ---
+//
+// The origin rules live in access.ts so the Nitro server and createApp() answer
+// the same way. Only a browser can be stopped here: a CLI client sends no Origin
+// at all, and binding to localhost is what keeps the LAN out (bin/m365-proxy.mjs).
+export { corsAllowlist, corsHeaders, isAllowedOrigin, ORIGIN_REFUSED } from "./access.js";
+import { corsHeaders, isAllowedOrigin, ORIGIN_REFUSED } from "./access.js";
 
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
-
-function withCors(res: Response): Response {
-  for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+function withCors(origin: string | null, res: Response): Response {
+  for (const [k, v] of Object.entries(corsHeaders(origin))) res.headers.set(k, v);
   return res;
 }
 
@@ -95,17 +95,22 @@ export function createApp(sessionOptions: ModelSessionOptions = {}): FetchApp {
   async function fetch(req: Request): Promise<Response> {
     const { pathname } = new URL(req.url);
     const method = req.method.toUpperCase();
+    const origin = req.headers.get("origin");
+
+    if (!isAllowedOrigin(origin)) {
+      return json(403, { error: { message: ORIGIN_REFUSED, type: "invalid_request_error" } });
+    }
 
     if (method === "OPTIONS") {
-      return withCors(new Response(null, { status: 204 }));
+      return withCors(origin, new Response(null, { status: 204 }));
     }
 
     if (method === "GET" && pathname === "/health") {
-      return withCors(json(200, HEALTH_PAYLOAD));
+      return withCors(origin, json(200, HEALTH_PAYLOAD));
     }
 
     if (method === "GET" && pathname === "/v1/models") {
-      return withCors(json(200, buildModelsPayload()));
+      return withCors(origin, json(200, buildModelsPayload()));
     }
 
     if (method === "POST" && pathname === "/v1/chat/completions") {
@@ -113,15 +118,15 @@ export function createApp(sessionOptions: ModelSessionOptions = {}): FetchApp {
       try {
         body = ChatCompletionRequest.parse(await req.json());
       } catch (err: any) {
-        return withCors(
+        return withCors(origin, 
           json(400, { error: { message: err.message, type: "invalid_request_error" } }),
         );
       }
       // req.signal aborts when the client disconnects → cancels the M365 turn.
-      return withCors(await handleChatCompletion(body, pool, { signal: req.signal }));
+      return withCors(origin, await handleChatCompletion(body, pool, { signal: req.signal }));
     }
 
-    return withCors(
+    return withCors(origin, 
       json(404, { error: { message: "Not found", type: "invalid_request_error" } }),
     );
   }
