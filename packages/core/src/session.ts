@@ -404,6 +404,7 @@ export class CopilotSession {
       let receivedContent = false;
       let throttleInfo: { current: number; max: number } | null = null;
       let contentOrigin: string | null = null;
+      let sawApology = false;
       let messageType: string | null = null;
       let messageId: string | null = null;
       // Highest per-component score across all messages this turn. The most
@@ -515,6 +516,9 @@ export class CopilotSession {
         },
         get contentOrigin() {
           return contentOrigin;
+        },
+        get apology() {
+          return sawApology;
         },
         get messageType() {
           return messageType;
@@ -881,6 +885,7 @@ export class CopilotSession {
               if (m.author !== "bot") continue;
               captureImages(m);
               if (m.contentOrigin) contentOrigin = m.contentOrigin;
+              if (m.contentOrigin === "Apology") sawApology = true;
               if (m.messageType) messageType = m.messageType;
               if (m.messageId) messageId = m.messageId;
               if (typeof m.turnCount === "number") turnCountServer = m.turnCount;
@@ -924,6 +929,7 @@ export class CopilotSession {
                 if (m.author === "bot") {
                   captureImages(m);
                   if (m.contentOrigin) contentOrigin = m.contentOrigin;
+                  if (m.contentOrigin === "Apology") sawApology = true;
                   if (m.messageType) messageType = m.messageType;
                   if (m.messageId) messageId = m.messageId;
                   if (m.scores) {

@@ -11,7 +11,7 @@ const scripted: {
   /** Text of every run() call, in order. */
   texts: string[];
   /** Per-call overrides, consumed front-first (e.g. a Disengaged turn, then an answer). */
-  queue: Array<{ fullText: string; messageType?: string | null; result?: { value: string; errorCode?: string; message?: string }; metering?: Record<string, number> }>;
+  queue: Array<{ fullText: string; messageType?: string | null; contentOrigin?: string; apology?: boolean; result?: { value: string; errorCode?: string; message?: string }; metering?: Record<string, number> }>;
   /** The model argument of every run() call, in order. */
   models: string[];
   /** The `useAgent` argument of every run() call, in order. */
@@ -69,7 +69,8 @@ vi.mock("@m365-copilot/core", async (importActual) => {
         metering: next?.metering ?? null,
         images: [],
         throttle: { current: 1, max: 600 },
-        contentOrigin: "Claude",
+        contentOrigin: next?.contentOrigin ?? "Claude",
+        apology: next?.apology ?? false,
         messageType: (next?.messageType ?? null) as string | null,
         messageId: "m1",
         scores: null,
@@ -422,6 +423,32 @@ describe("an explicitly Throttled turn (result.value = Throttled)", () => {
   });
 });
 
+describe("a prompt over the model's input limit (result.value = InvalidRequest)", () => {
+  // Live, GPT-6.1 Sol on a Codex first turn: no content, only this final result.
+  const TOO_LONG = { value: "InvalidRequest", errorCode: "InputTokenLimitExceeded" };
+
+  it("fails fast with a 400 that says the prompt is too long — no retries", async () => {
+    scripted.deltas = [];
+    scripted.fullText = "";
+    scripted.result = TOO_LONG;
+    scripted.runs = 0;
+    const body = ChatCompletionRequest.parse({
+      model: "gpt-6.1-sol",
+      stream: false,
+      messages: [{ role: "user", content: "a very long prompt" }],
+    });
+    const res = await handleChatCompletion(body, new SessionPool());
+    scripted.result = null;
+    expect(res.status).toBe(400);
+    const err = (await res.json()).error;
+    expect(err.type).toBe("invalid_request_error");
+    expect(err.code).toBe("context_length_exceeded");
+    expect(err.param).toBe("InputTokenLimitExceeded");
+    expect(err.message).toContain("too long for gpt-6.1-sol");
+    expect(scripted.runs).toBe(1); // the empty-reply path spent 3 attempts here
+  });
+});
+
 describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for", () => {
   const hold = () => new TurnBudgetHold("throttle hold", 65 * 60_000, Date.parse("2026-10-12T08:00:00.000Z"));
 
@@ -500,6 +527,29 @@ describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for"
 
 describe("Disengage retry keeps a model's <system>-free framing", () => {
   const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+
+  it("retries the prompt filter's canned apology once in a fresh conversation, like a Disengage", async () => {
+    const APOLOGY = "Sorry, it looks like I can't chat about this. Let's try a different topic.";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    // Live: the apology streams as contentOrigin "Apology"; the final item restates
+    // it under another origin, which is why the sticky flag is what the handler reads.
+    scripted.queue = [{ fullText: APOLOGY, contentOrigin: "DeepLeo", apology: true }, { fullText: "```bash\nls\n```" }];
+    const body = ChatCompletionRequest.parse({
+      model: "gpt-5.6-think-deeper", stream: false, tools,
+      messages: [{ role: "user", content: "change the port in config.json to 8080, leave everything else unchanged" }],
+    });
+    const res = await handleChatCompletion(body, new SessionPool());
+    scripted.queue = [];
+    expect(res.status).toBe(200);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.newConversations).toBe(1);
+    const message = (await res.json()).choices[0].message;
+    expect(message.content ?? "").not.toContain("can't chat about this");
+    expect(message.tool_calls[0].function.name).toBe("bash");
+  });
+
   async function disengageThenAnswer(model: string): Promise<string> {
     scripted.result = null;
     scripted.texts = [];

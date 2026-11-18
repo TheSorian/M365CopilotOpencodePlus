@@ -351,6 +351,20 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - The `nativeclient` OAuth redirect bounces to `/common/wrongplace`; the auth code is
   scraped from the navigation request, not a settled URL.
 
+- **M365's refusals are not answers, and each one has its own path** (ported from upstream,
+  2026-11-18): `Throttled` → 429; `InvalidRequest` / `InputTokenLimitExceeded` → 400
+  `context_length_exceeded` after ONE attempt, because a retry re-sends the same over-long
+  prompt and used to end at a 502 blaming the content filter; and the canned apology
+  (`contentOrigin: "Apology"`, "Sorry, it looks like I can't chat about this") → the same single
+  retry in a fresh conversation as a `Disengage`. Read the apology through the sticky
+  `CopilotStream.apology`, not `contentOrigin`: the final item restates that message under
+  another origin, and a retry keyed on the last origin never fired live (`ff057c7`). A tool
+  argument whose schema documents it in **milliseconds** that arrives under 1000 is read as
+  seconds (`millisecondArgsFixed`, `core/tools.ts`) — models fill `timeout: 30` meaning 30 s,
+  and Claude Code reads that as 30 ms and backgrounds the command. The give-up guard also
+  matches "I can't generate files … in the current session", first person only, so a finished
+  answer about what some program can't do is not a give-up.
+
 - **The proxy listens on localhost only and refuses foreign browser origins** (#93, ported
   from upstream `9bba755` without its optional API key). `bin/m365-proxy.mjs` sets
   `NITRO_HOST=127.0.0.1` unless `HOST`/`NITRO_HOST` is already set — `HOST=0.0.0.0` opts back

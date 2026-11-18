@@ -125,6 +125,7 @@ export {
   trimOpenCodeTools,
   shapeToolsForRequest,
   parseToolCalls,
+  millisecondArgsFixed,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
   looksLikeRemoteArtifactCompletion,

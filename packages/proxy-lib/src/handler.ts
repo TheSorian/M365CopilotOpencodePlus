@@ -29,6 +29,7 @@ import {
   type ParsedToolCall,
   imageUrls,
   parseToolCalls,
+  millisecondArgsFixed,
   buildSpecMap,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
@@ -1064,6 +1065,17 @@ export async function handleChatCompletion(
         return { error: throttledResponse(copilotStream.result) };
       }
 
+      // M365 rejects a prompt over the model's input limit outright: no content,
+      // `result: InvalidRequest (InputTokenLimitExceeded)`. It used to fall through
+      // to the empty-reply path: three attempts with the SAME prompt, then a 502
+      // blaming a content filter. Any retry re-sends it, so fail fast and say what
+      // to cut (§39).
+      if (copilotStream.result?.value === "InvalidRequest") {
+        noteRequestOutcome(false, convId);
+        log.info(`Upstream InvalidRequest (${copilotStream.result.errorCode ?? "no errorCode"}), prompt ${text.length} chars — 400, no retry`);
+        return { error: invalidRequestResponse(copilotStream.result, model, text.length) };
+      }
+
       // A tone whose agent route serves only on a premium account came back as
       // the dead route (`InternalError`, no content): this account isn't
       // premium. Remember that for the process, and re-send the WHOLE request
@@ -1127,6 +1139,28 @@ export async function handleChatCompletion(
         noteRequestOutcome(false, convId); // an answer, not a throttle
         log.info(`Priority access exhausted (${exhausted.window}) — resets ${exhausted.resetsAt.toISOString()}`);
         return { error: priorityAccessResponse(exhausted, model) };
+      }
+
+      // M365's prompt filter can answer with a canned apology instead of a
+      // Disengaged message: contentOrigin "Apology", "Sorry, it looks like I can't
+      // chat about this. Let's try a different topic." It is F22's refusal with
+      // text, and it used to reach the client as the model's answer. The final item
+      // restates that message under another origin, so read the turn's sticky
+      // `apology` flag. Retry it like a Disengage, once, in a fresh conversation; a
+      // second apology goes through as before. Tool requests only: they're
+      // buffered, so nothing has been streamed yet.
+      if (
+        (copilotStream.apology || copilotStream.contentOrigin === "Apology") &&
+        hasTools && !disengageRetried && !process.env.M365_NO_DISENGAGE_RETRY
+      ) {
+        disengageRetried = true;
+        session.newConversation();
+        const retryVariant = transcriptStyleForVariant(framingVariant).framingTag === "system" ? "softened" : framingVariant;
+        text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, retryVariant);
+        inputImages = imageUrls(body.messages);
+        log.info(`Upstream Apology (prompt filter) — retrying once with '${retryVariant}' framing in a fresh conversation (F22)`);
+        attempt--; // free retry; bounded — disengageRetried flips once
+        continue;
       }
 
       if (copilotStream.hasContent || fullText.length > 0) {
@@ -1462,7 +1496,11 @@ export async function handleChatCompletion(
       // the turn that carries the real result (executedOnlyFirstNote).
       const notes = [rewriteNote, executedOnlyFirstNote(cutFabricated, droppedCalls, textAfterFirstToolCall(fullText, body.tools).length)].filter(Boolean);
       conv.pendingNote = notes.length ? notes.join("\n") : null;
-      return { kind: "tools", toolCalls: parsed.toolCalls };
+      // A sub-second millisecond argument is the model filling the tools block in
+      // seconds (`timeout: 30`) — nobody means 30 ms (§39).
+      const fixed = parsed.toolCalls.map((c) => millisecondArgsFixed(c, body.tools));
+      if (fixed.some((c, i) => c !== parsed.toolCalls[i])) log.info("A millisecond argument under 1000 read as seconds (e.g. timeout: 30)");
+      return { kind: "tools", toolCalls: fixed };
     }
     return { kind: "text", text: fullText };
   } else {
@@ -1898,6 +1936,24 @@ function turnBudgetHoldResponse(hold: TurnBudgetHold): Response {
     },
     { "Retry-After": String(retryAfter) },
   );
+}
+
+/** M365 refused the turn as an invalid request; `InputTokenLimitExceeded` means
+ *  the prompt is too big for this model. A 400: re-sending it can't succeed. */
+function invalidRequestResponse(result: { errorCode?: string; message?: string }, model: string, promptChars: number): Response {
+  const tooLong = result.errorCode === "InputTokenLimitExceeded";
+  const message = tooLong
+    ? `M365 Copilot refused the prompt as too long for ${model} (InputTokenLimitExceeded; ${promptChars} characters sent). ` +
+      `Shorten the system prompt or the tool definitions, or use another model.`
+    : `M365 Copilot rejected the request (InvalidRequest${result.errorCode ? `: ${result.errorCode}` : ""})${result.message ? `: ${result.message}` : "."}`;
+  return jsonResponse(400, {
+    error: {
+      message,
+      type: "invalid_request_error",
+      code: tooLong ? "context_length_exceeded" : "m365_invalid_request",
+      ...(result.errorCode ? { param: result.errorCode } : {}),
+    },
+  });
 }
 
 /** Empty upstream reply that is NOT an at-limit throttle — a distinct failure

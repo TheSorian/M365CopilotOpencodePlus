@@ -390,6 +390,38 @@ export interface ParseResult {
   textContent: string | null;
 }
 
+/**
+ * A call whose numeric arguments the tool's schema documents in milliseconds,
+ * with any value under 1000 read as seconds. Models fill the tools block's
+ * optional `timeout: <timeout>` in seconds: GPT-5.6 Think Deeper sent Claude
+ * Code's Bash `timeout: 30`, Claude Code moved each command to the background
+ * after its 1 s floor, and `claude -p` never exited (§39). Nobody means a
+ * sub-second timeout. Returns the same call when nothing changes.
+ */
+export function millisecondArgsFixed<C extends { function: { name: string; arguments: string } }>(
+  call: C,
+  tools: ToolDef[] | undefined,
+): C {
+  const schema = tools?.find((t) => t.function.name === call.function.name)?.function.parameters;
+  const props = schema?.properties;
+  if (!props) return call;
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(call.function.arguments);
+  } catch {
+    return call;
+  }
+  if (!args || typeof args !== "object") return call;
+  let changed = false;
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value !== "number" || value <= 0 || value >= 1000) continue;
+    if (!/millisecond/i.test(String(props[key]?.description ?? ""))) continue;
+    args[key] = value * 1000;
+    changed = true;
+  }
+  return changed ? { ...call, function: { ...call.function, arguments: JSON.stringify(args) } } : call;
+}
+
 // Patterns of M365's stochastic turn-1 "give-up" confabulation: it claims it can't
 // see/run anything and asks the user to paste files, WITHOUT ever calling a tool —
 // even though the environment is real. Used to trigger a forcing retry (handler).
@@ -413,6 +445,13 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // it claims its own tools are gone, then delegates the edit back to the user.
   /(?:tool|editor|shell|command|file-?editing)s?[^.\n]{0,40}\b(?:not\s+available|unavailable|aren.?t\s+available|isn.?t\s+available|are\s+not\s+accessible)/i,
   /(?:can.?t|cannot|not\s+able\s+to|unable\s+to)\s+(?:directly\s+)?(?:edit|modify|write\s+to|change|save|create|open)\s+(?:the\s+|any\s+|to\s+)?files?/i,
+  // GPT-5.6 gave up on a PDF task with "I can't generate files in the current
+  // session" (Windows / pi, relay_batch), and nothing here caught a give-up that
+  // names files/documents/PDFs or is scoped to the session. Both patterns are
+  // FIRST person on purpose, so a finished answer saying what some program can't
+  // do ("the exporter can't generate PDFs without wkhtmltopdf") is not a give-up.
+  /\bI(?:\s+(?:can.?t|cannot)|(?:\s+am|.?m)\s+(?:unable|not\s+able)\s+to)\s+(?:directly\s+)?(?:generate|produce|export|create|make)\s+(?:the\s+|any\s+)?(?:files?|documents?|PDFs?)\b/i,
+  /\bI(?:\s+(?:can.?t|cannot)|(?:\s+am|.?m)\s+(?:unable|not\s+able)\s+to)\b[^.\n]{0,60}\b(?:in|during)\s+(?:the|this)\s+(?:current\s+)?(?:session|chat|conversation)\b/i,
   /paste\s+(?:the\s+)?(?:contents?|files?|code|them)/i,
   /provide\s+(?:the\s+)?(?:contents?|files?)/i,
   /(?:environment|shell|tool)\s+(?:isn.?t|is not|aren.?t|are not|appears? to be)\s+(?:return|provid|respond|work|access)/i,

@@ -213,6 +213,27 @@ Sonnet 5.5, which has the same sandbox and a metered budget (80/day) — §26.
 
 ---
 
+## F. Reply text fidelity (what M365 does to a reply before we see it)
+
+### E-T1 - Does M365 delete a bracketed word (`[regex]::Replace(` → `:Replace(`)? (F99)
+
+Hypothesis and evidence: `hypotheses.md` F99. Cost: one fresh conversation per run.
+
+```sh
+nix develop --command bash -c 'PROBE_MODEL=claude-sonnet node scripts/bracket-strip-probe.mjs'
+```
+
+It starts a spare instance on `PROBE_PORT` (default 4148, so 4141 is untouched) with its own
+log (`~/.config/opencode-m365/bracket-probe.log`), asks for one PowerShell line containing
+the literal, and prints the reply plus, from the log, whether the term survived in the token
+deltas and in the message snapshots.
+
+**Readout:** `[regex]::Replace(` present in both → immune, port nothing but the host note.
+Absent from the snapshot only → our composer already keeps the deltas, add a test and move on.
+Absent from both → the damage is upstream of us; port their three-layer restore. An empty
+turn (`InternalError`, no content) is the account, not the answer: re-run later, do not
+count it as evidence either way.
+
 ## Adding an experiment
 
 1. State the hypothesis + falsification criterion in `hypotheses.md`.

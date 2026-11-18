@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseToolCalls, formatToolDefinitions, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
+import { parseToolCalls, millisecondArgsFixed, formatToolDefinitions, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
 import type { ToolDef } from "./tools.js";
 
 describe("parseToolCalls", () => {
@@ -396,6 +396,23 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("ozet.md oluşturuldu: 18 bölüm, paket mimarisi ve araç çağrısı akışı.")).toBe(false);
     // Third person ("yetkisi"), not first ("yetkim"): describes the code, not a give-up.
     expect(looksLikeConfabulation("Kullanıcının yetkisi bulunmuyorsa proxy 403 döner.")).toBe(false);
+  });
+
+  it("flags the first-person 'can't generate files' / 'can't … in this session' give-ups", () => {
+    // The exact GPT-5.6 reply from a live PDF task (Windows / pi, relay_batch): it
+    // reached the user with no forcing retry.
+    expect(looksLikeConfabulation("You’re right. The recorded command was truncated at `margin: 22m`, produced no output, and did not create the intended HTML, CSS, or PDF.\n\nI can’t generate files in the current session. If you paste the original document content or request again, I can provide complete, copy-paste-ready HTML/CSS that you can save locally and print to PDF.")).toBe(true);
+    expect(looksLikeConfabulation("I can't create or run scripts in this session.")).toBe(true);
+    expect(looksLikeConfabulation("I'm unable to produce the PDF here.")).toBe(true);
+    expect(looksLikeConfabulation("I am not able to export documents during this conversation.")).toBe(true);
+  });
+
+  it("does NOT flag what a program can't do, or a question that offers code", () => {
+    // Third person: a finished answer describing a tool's limits.
+    expect(looksLikeConfabulation("Done. Note that the exporter can't generate PDFs without wkhtmltopdf installed.")).toBe(false);
+    expect(looksLikeConfabulation("The CLI cannot export documents in a chat session; run it from a terminal.")).toBe(false);
+    // A real reply with no request in it: a question, not a give-up.
+    expect(looksLikeConfabulation("I can see the tests in `test.mjs`, but there’s no request or `todo.mjs` implementation yet.\n\nWould you like me to write the copy-paste-ready `todo.mjs` code that satisfies these tests?")).toBe(false);
   });
 
   it("flags Spanish give-up confabulations (mid-conversation or turn 1)", () => {
@@ -1117,5 +1134,49 @@ describe("a call the model rewrites after replaying its whole preamble", () => {
   it("keeps two calls when a short lead-in is repeated instead of a real preamble", () => {
     const reply = `Then:\n\n\`\`\`bash\n${CMD1}\n\`\`\`\n\nThen:\n\n\`\`\`bash\n${CMD2}\n\`\`\``;
     expect(parseToolCalls(reply, bashTool).toolCalls).toHaveLength(2);
+  });
+});
+
+describe("millisecondArgsFixed (a sub-second millisecond argument is seconds)", () => {
+  // Claude Code's Bash schema, abridged. OpenCode's shell is the same shape.
+  const tools = [
+    {
+      type: "function",
+      function: {
+        name: "Bash",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "The command to execute" },
+            timeout: { type: "number", description: "Optional timeout in milliseconds (max 600000)" },
+            description: { type: "string", description: "Clear, concise description of what this command does" },
+          },
+        },
+      },
+    },
+  ];
+  const call = (args: Record<string, unknown>) => ({
+    id: "c1",
+    type: "function",
+    function: { name: "Bash", arguments: JSON.stringify(args) },
+  });
+
+  it("reads a millisecond value under 1000 as seconds", () => {
+    // Live, GPT-5.6 Think Deeper filled Claude Code's `timeout: <timeout>` with 30:
+    // Claude Code read 30 ms, backgrounded every command after its 1 s floor, and
+    // the run never exited.
+    const out = millisecondArgsFixed(call({ command: "python3 check.py", timeout: 30 }), tools);
+    expect(JSON.parse(out.function.arguments)).toEqual({ command: "python3 check.py", timeout: 30000 });
+  });
+
+  it("leaves real millisecond values, other parameters and unknown tools alone", () => {
+    const ms = call({ command: "sleep 5", timeout: 120000 });
+    expect(millisecondArgsFixed(ms, tools)).toBe(ms);
+    // No millisecond in the schema: `limit: 30` lines is not 30000 lines.
+    const other = { id: "c2", type: "function", function: { name: "Read", arguments: JSON.stringify({ limit: 30 }) } };
+    expect(millisecondArgsFixed(other, tools)).toBe(other);
+    const bad = { id: "c3", type: "function", function: { name: "Bash", arguments: "not json" } };
+    expect(millisecondArgsFixed(bad, tools)).toBe(bad);
+    expect(millisecondArgsFixed(ms, undefined)).toBe(ms);
   });
 });

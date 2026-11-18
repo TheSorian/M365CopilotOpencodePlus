@@ -5840,3 +5840,45 @@ rule rests on the general shape — projects that start red — not on a local c
 tool turn. If a sweep is ever run: `--label preexisting` against the current
 default, and the signal is turns per task on tasks whose sandbox starts red.
 
+### Second batch: four small fixes, ported one at a time (2026-11-18)
+
+`761e476`, `6c07a22`, `500a193` and `056acb9` + `ff057c7` were read in full, reproduced
+against our build where it applied, and ported separately, each with its own test
+(suite 500 → 510 with the access fix, then 516). Their framing/prompt architecture
+was not touched.
+
+| Commit | Our state before | Now |
+|---|---|---|
+| `761e476` confabulation | no pattern matched "I can't generate files in the current session" (the live GPT-5.6 / pi / `relay_batch` PDF give-up) | two first-person patterns: files/documents/PDFs, and "... in the current session/chat/conversation". Third person ("the exporter can't generate PDFs") stays unflagged |
+| `6c07a22` milliseconds | `timeout: 30` reached the harness as 30 ms; Claude Code backgrounded every command after its 1 s floor | `millisecondArgsFixed` (`core/tools.ts`): a numeric argument the tool's schema documents in milliseconds, under 1000, is read as seconds |
+| `500a193` `InvalidRequest` | the word did not appear anywhere in our code, so an over-limit prompt spent three attempts and then a 502 blaming the content filter | 400 `context_length_exceeded` after one attempt, saying how many characters were sent |
+| `056acb9`+`ff057c7` apology | our Disengage retry read `messageType` only; the canned apology arrives as text and reached the user as the answer | sticky `apology` flag on `CopilotStream` (the final item restates the message under another origin) and the same one-retry-in-a-fresh-conversation treatment as a Disengage |
+
+**F99 — does M365 delete a bracketed word from a reply before we see it?** (their `fc998f4`)
+
+Their evidence: the post-processing deletes `[word]`, the colon and the whitespace after
+it from a message's final text, code blocks included and not every time: `[regex]::Replace(`
+arrives as `:Replace(`, a Python `-> list[Item]:` loses the token and the newline after it.
+In a Codex pressure test 4 of 4 in-place PowerShell edits then ran `$updated = :Replace(...)`
+and wrote the resulting nothing over the file.
+
+**Our prior: we may already be immune.** `TurnTextComposer` assembles each message from
+its own snapshot and its deltas, and `foldStreamText` keeps whichever is LONGER
+(`next.length <= answer.length` → keep the answer). A deletion in the final snapshot
+therefore cannot overwrite the delta-built text — which is precisely the alignment
+upstream had to write. The risk left is the other order: if the damaged text is the
+message's FIRST snapshot (the head that arrives before any delta), the deltas extend a
+truncated head and the token is gone for good.
+
+**Probe:** `scripts/bracket-strip-probe.mjs` — one conversation per run, ask for a
+PowerShell line containing the literal, then compare the deltas with the snapshot in the
+debug log. **Falsification:** the token survives in both → nothing to port (only the
+host note is worth keeping: ask for full dotted .NET type names, which is text and costs
+nothing). If `fullText` lost it while the deltas kept it, the composer is at fault; if both
+lost it, the damage is upstream and their three-layer fix is needed.
+
+**Attempt 1 (2026-11-18 16:42Z): inconclusive.** The account was in an empty-turn phase:
+three turns in a row came back `InternalError` with no content (one through
+`ModelSession`, two through a spare instance), `numUserMessagesInConversation` 1 and 2 of
+600, so not the message counter. Also seen in §38 F96 and bursty by nature — re-run in a
+fresh window rather than reading anything into it.
