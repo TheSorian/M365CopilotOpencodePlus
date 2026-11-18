@@ -366,6 +366,24 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("La herramienta de edición no está disponible en esta conversación.")).toBe(true);
   });
 
+  it("flags the same give-ups in Spanish (the model answers in the user's language)", () => {
+    // The live shapes, translated: the English twin was caught, these were not.
+    expect(looksLikeConfabulation("No puedo generar archivos en esta sesión.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo crear archivos en esta conversación. Pégame el contenido y te doy el HTML listo para guardar.")).toBe(true);
+    expect(looksLikeConfabulation("No soy capaz de exportar documentos en esta sesión.")).toBe(true);
+    expect(looksLikeConfabulation("No me es posible producir el PDF aquí.")).toBe(true);
+    expect(looksLikeConfabulation("Me resulta imposible generar el documento en esta sesión.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo crear ni ejecutar scripts en esta sesión.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo guardar el informe en esta sesión; el archivo no llega al disco.")).toBe(true);
+  });
+
+  it("does NOT flag Spanish prose that merely describes a limit", () => {
+    // Third person: a finished answer about a program, not a give-up.
+    expect(looksLikeConfabulation("Listo. Ojo: el exportador no puede generar PDFs sin wkhtmltopdf instalado.")).toBe(false);
+    expect(looksLikeConfabulation("La autenticación no es posible en esta sesión sin MSAL, pero el proxy ya la hace sola.")).toBe(false);
+    expect(looksLikeConfabulation("Terminado: el informe está en informe.pdf y la sesión se cerró sin errores.")).toBe(false);
+  });
+
   it("flags the Spanish give-ups of a hidden toolset (2026-11-11, Office)", () => {
     // Exact live replies: the request carried no Office tool (the OpenCode
     // allowlist trimmed `officecli` and `OfficeMCP.*`), so the model announced the
