@@ -166,6 +166,30 @@ Nothing else is needed: no GPT-V `optionsSets` on the turn, and it works with th
 (hypotheses §33 F86). `core/src/image-input.ts`; the handler sends the OpenAI `image_url` (data URL)
 parts of the messages a turn carries.
 
+### Documents in a turn (OneDrive `LocalFile`)
+
+A **document** does not go through `UploadFile`. The web client puts it in the user's OneDrive, in
+the "Microsoft Copilot Chat Files" special folder, and attaches the drive item (captured upstream,
+hypotheses §39 F97):
+
+1. `POST https://graph.microsoft.com/v1.0/me/drive/special/copilotuploads:/<name>:/createUploadSession`
+   with the **Graph** token (`Files.ReadWrite.All`), `Prefer: ExtractTextOnCommit`, body
+   `{"item": {"@microsoft.graph.conflictBehavior": "replace", "name": "<name>"}}`; the reply carries
+   `uploadUrl`.
+2. `PUT <uploadUrl>` with `Content-Range` (chunks must be multiples of 320 KiB; the upload URL is
+   pre-authorized and takes **no** bearer token).
+3. `GET /me/drive/items/<id>?$select=id,name,webUrl,sharepointIds` for the `webUrl` and the three
+   SharePoint ids.
+4. The chat invocation's `message.messageAnnotations: [{ id: "SPO_<base64 siteId,webId,listId>_<itemId>",
+   text: <name>, url: <webUrl>, messageAnnotationType: "LocalFile" }]` — base64 without padding.
+
+`core/src/file-upload.ts`; the handler sends it alongside the images, and the OpenAI `file` part's
+`filename` rides into the data URL as `;name=` so the OneDrive name survives formatting.
+
+**Not verified live here.** The upload path is upstream's, with a Graph token from the cached
+login; this account has not been measured against it yet (a failed upload is reported in the turn's
+text, so it never silently answers about a file it never got).
+
 ### The mandatory Metrics frame (`type: 1`, `target: "Metrics"`)
 ```json
 {

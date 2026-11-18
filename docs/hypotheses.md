@@ -5906,3 +5906,22 @@ runs Git Bash (POSIX), so the case we would see is the Python `-> list[Item]:` o
 debug log now prints "Restored text M365 stripped…" whenever the restore fires, so a hit
 shows up without diffing anything.
 
+## Documents: OneDrive + `LocalFile`, not the image upload (2026-11-18)
+
+Upstream `d48c26c` (their §39 F97): an OpenAI `file` part (a document as a data URL) is not an
+image and does not go to `UploadFile`. The web client creates an upload session in the user's
+OneDrive `copilotuploads` folder, PUTs the bytes, and attaches a `LocalFile` annotation whose id is
+`SPO_<base64 siteId,webId,listId>_<itemId>`. Ported whole: `core/file-upload.ts` (`uploadFile`,
+`attachmentUrls`, `parseDataUrl`, `spoId`), the `file` part in `schemas.ts` and `Message`, the
+annotations union in `ModelSession.run` / `ChatTurnOptions`, and the handler now passes
+`attachmentUrls(...)` where it passed `imageUrls(...)`. Suite 527 → 533 (5 unit tests over the
+upload, 1 through the handler).
+
+**H41 — does our cached login actually carry the Graph token?** Their client is the web client's,
+so `Files.ReadWrite.All` came with the same consent. Ours is the `nativeclient` redirect with the
+Copilot substrate scopes; `getTokenForScope(["https://graph.microsoft.com/.default"])` is a silent
+acquire that may come back empty or need consent. **Probe:** one `proxy-verify --tools` turn with a
+tiny PDF as a `file` part and read the debug log for `Uploaded … → <id>`; a failure shows as
+`File upload failed: …` plus the note in the turn's text. Falsification: no token → the feature
+degrades to that note on every turn, and the one-line fix is the Graph scope in the login request.
+`attachmentUrls` itself is pure and tested; only the token half is unmeasured.
