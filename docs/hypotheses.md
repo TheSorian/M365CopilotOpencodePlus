@@ -5929,7 +5929,7 @@ degrades to that note on every turn, and the one-line fix is the Graph scope in 
 ## 40. Nov 11 2026 — StreamHub, the new web client's transport
 
 Ported from upstream's `d48c26c`-era chain (`39332c5`, `bc13a55`, `fc998f4`, `cdf4297`): the
-measurements below are theirs, on their premium account; our live rerun is H40d/H41.
+measurements below are theirs, on their premium account; our live rerun is H40d/H42.
 
 The web app (`copilot.cloud.microsoft`) has three surfaces: Chat, Cowork and Code. Chat runs on a new
 WebSocket endpoint, **StreamHub**; Cowork and Code on a separate agent runtime.
@@ -6034,10 +6034,16 @@ frequent, extend the guard beyond PowerShell.
 Their rate was 4 of 4 in-place PowerShell edits on Codex/Windows; our pi host runs Git Bash (POSIX), so
 the case we would see is the Python one above. The debug log prints "Restored text M365 stripped…"
 whenever the restore fires, so a hit shows up without diffing anything. **Probe:** one
-`scripts/bracket-strip-probe.mjs` run when the account serves turns again.
+`scripts/bracket-strip-probe.mjs` run when the account serves turns again. Ran 2026-11-18 on
+`gpt-5.6-think-deeper` (Chathub): no strip — deltas and final snapshot identical, `[regex]::Replace(`
+intact in both — so the restore did not fire because there was nothing to restore. n=1, one
+tone: the deletion may still be tone- or account-day-specific, and a hit in a real session still
+shows up in the debug log without diffing anything.
 
-### H41 — the Bing plugin on our account
+### H42 — the Bing plugin on our account
 The fallback (a refusal re-sent once without `BingWebSearch`) is ported and unit-tested, never fired
 here: this account has not yet refused an agent-less prompt because of the plugin. **Probe:** ask
 `gpt-6-think-deeper` for a one-line prompt and read the log for "refused the prompt with the Bing
-plugin attached".
+plugin attached". Ran 2026-11-18: the tone answered the probe's prompt agent-less with Bing attached
+(result Success, no InputTokenLimitExceeded), so on this account the plugin does not push it over the
+limit. The fallback stays as insurance; it has still never fired here.
