@@ -385,6 +385,9 @@ HOST PLATFORM: Windows. The \`${shell.function.name}\` tool runs PowerShell on a
 
 - create/overwrite a file: \`Set-Content -Path name -Value @'\n…\n'@\`
 - edit in place: \`(Get-Content f) -replace 'old','new' | Set-Content f\`
+- text matching: use the \`-replace\` and \`-match\` operators. If you must call a .NET
+  method, spell the type in full (\`[System.Text.RegularExpressions.Regex]::Replace(...)\`),
+  never a bare \`[regex]::…\`
 - inspect: \`Get-Content\` / \`Get-ChildItem\` / \`Select-String\`
 - paths use \`\\\` and may contain spaces — quote them.
 

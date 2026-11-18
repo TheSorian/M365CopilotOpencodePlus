@@ -70,6 +70,12 @@ When the message has no <tools> block, respond normally as a helpful assistant i
  * (e.g. "Default-fa7f56d8-49c4-4327-b816-9a0eeaa273df"). Pure — no network.
  */
 export function environmentUrlFromName(envName: string): string {
+  // The `default` host prefix comes from the name, not from being the tenant's
+  // default environment: some tenants' `~default` is a plain GUID, and its host
+  // has no prefix (`default<id>` is NXDOMAIN there). Our own tenant is
+  // `Default-…`, so the omission only bites on a different account - which is
+  // exactly the kind of thing that looks fine until someone else logs in.
+  const prefix = /^Default-/i.test(envName) ? "default" : "";
   const envId = envName
     .replace(/^Default-/i, "")
     .replace(/-/g, "")
@@ -92,7 +98,7 @@ export function environmentUrlFromName(envName: string): string {
     throw new Error(`Unexpected Power Platform environment ID: ${envId}`);
   }
   return (
-    `https://default${envId.slice(0, -2)}.${envId.slice(-2)}` +
+    `https://${prefix}${envId.slice(0, -2)}.${envId.slice(-2)}` +
     `.environment.api.powerplatform.com`
   );
 }
@@ -279,6 +285,20 @@ async function createBot(
   return { botId };
 }
 
+/** A tenant that has Copilot extensibility switched off answers with this,
+ *  and no amount of recreating the bot changes it. */
+export function isTenantPolicyDenial(message: string | undefined | null): boolean {
+  return /CopilotExtensibilityNotEnabled/.test(message ?? "");
+}
+
+/** Set once publishing is refused by tenant policy; no more attempts this process. */
+let agentBlockedByPolicy = false;
+
+/** Forget the policy block (tests, and a caller that knows the tenant changed). */
+export function resetAgentPolicyBlock(): void {
+  agentBlockedByPolicy = false;
+}
+
 async function publishBot(
   envUrl: string,
   token: string,
@@ -314,6 +334,7 @@ export async function getOrCreateAgent(
 ): Promise<string | null> {
   const wantHash = getInstructionsHash();
   const wantName = getAgentName();
+  if (agentBlockedByPolicy) return null;
 
   // Fast path: cached agent built from the same instructions.
   // Skipped on forceRefresh: that path re-validates against the tenant to
@@ -370,6 +391,14 @@ export async function getOrCreateAgent(
     try {
       titleId = await publishBot(envUrl, ppToken, botId);
     } catch (pubErr: any) {
+      // An account policy, not a broken bot: recreating can't fix it and would
+      // leave a fresh unpublished bot in the tenant on every attempt.
+      if (isTenantPolicyDenial(pubErr?.message)) {
+        agentBlockedByPolicy = true;
+        throw new Error(
+          "Copilot extensibility is not enabled for this account (tenant policy) - tool agent unavailable",
+        );
+      }
       // If publish fails (e.g. missing icon/instructions on legacy bot), delete and recreate
       log.info(
         `Publish failed (${pubErr.message.slice(0, 100)}), deleting and recreating bot...`,
@@ -396,6 +425,8 @@ export async function getOrCreateAgent(
     saveCachedAgent({ agentId, botId, instructionsHash: wantHash, createdAt: new Date().toISOString() });
     return agentId;
   } catch (err: any) {
+    // Includes create failures and the second create/publish after ordinary recovery.
+    if (isTenantPolicyDenial(err?.message)) agentBlockedByPolicy = true;
     log.error("Agent creation failed:", err.message, err.cause?.message || "");
     return null;
   }

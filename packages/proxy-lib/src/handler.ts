@@ -1052,6 +1052,12 @@ export async function handleChatCompletion(
       lastScores = copilotStream.scores;
       lastTurnCount = copilotStream.turnCount;
       lastMetering = copilotStream.metering;
+      // The classifier scores reach clients only as `usage` extension fields, which
+      // a gateway (and most harnesses) drop. Writing them here is what lets an
+      // experiment watch how close a prompt sits to Disengaged in this log.
+      if (lastScores && Object.keys(lastScores).length > 0) {
+        log.info(`Turn scores: ${Object.entries(lastScores).map(([k, v]) => `${k}=${v}`).join(" ")}${lastMessageType ? ` (${lastMessageType})` : ""}, cid=${session.conversationId}`);
+      }
 
       // M365 SAYS when it throttles: the final item's result is `Throttled` /
       // `PerUserThrottled` (#35). Checked BEFORE the content check so
