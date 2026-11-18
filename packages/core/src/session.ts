@@ -166,6 +166,48 @@ export function cursorMessageId(j: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
+// What M365's post-processing deletes from a reply: a bracketed word, a colon,
+// and the whitespace after it.
+const STRIPPED_TOKEN = /\[\w+\]:\s*/y;
+
+/**
+ * Undo M365's bracket stripping from the model's own text.
+ *
+ * A message's final text (its last snapshot) is M365's post-processed copy, and
+ * that deletes `[word]:` plus the whitespace after it — inside code blocks too,
+ * and not every time: `[regex]::Replace(` arrives as `:Replace(`, `if row[col]:`
+ * plus the next line's indent as `if row` glued to that line, `{[key]: 1}` as
+ * `{1}` (docs/hypotheses.md §40 F111). On Windows that turned an in-place
+ * PowerShell edit into `$updated = :Replace(…)`, a `$null` that `Set-Content`
+ * then wrote over the file. The token deltas carry what the model wrote.
+ *
+ * Given `raw`, the longest text the deltas built for a message (a prefix of
+ * what the model wrote), and `final`, its final text: when the two differ only
+ * by such deletions, returns `raw` plus whatever of `final` the deltas never
+ * reached. Otherwise null.
+ */
+export function restoreStrippedBrackets(raw: string, final: string): string | null {
+  let i = 0;
+  let j = 0;
+  while (i < raw.length && j < final.length) {
+    if (raw[i] === final[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    STRIPPED_TOKEN.lastIndex = i;
+    const m = STRIPPED_TOKEN.exec(raw);
+    if (!m) return null;
+    i += m[0].length;
+  }
+  for (STRIPPED_TOKEN.lastIndex = i; i < raw.length; STRIPPED_TOKEN.lastIndex = i) {
+    const m = STRIPPED_TOKEN.exec(raw);
+    if (!m) return null;
+    i += m[0].length;
+  }
+  return raw + final.slice(j);
+}
+
 /**
  * Reassemble one turn's text from M365's PER-MESSAGE stream.
  *
@@ -189,6 +231,19 @@ export function cursorMessageId(j: string | undefined): string | null {
 export class TurnTextComposer {
   private texts = new Map<string, string>();
   private target: string | null = null;
+  // Per message: the run of deltas in progress (the text it started from, and
+  // the deltas since), and the longest text a finished run built. The deltas
+  // are the model's own text; see restoreStrippedBrackets.
+  private runs = new Map<string, { base: string; deltas: string }>();
+  private longestRun = new Map<string, string>();
+
+  private endRun(key: string): void {
+    const run = this.runs.get(key);
+    this.runs.delete(key);
+    if (!run?.deltas) return;
+    const built = run.base + run.deltas;
+    if (built.length > (this.longestRun.get(key)?.length ?? 0)) this.longestRun.set(key, built);
+  }
 
   /** A cursor frame: subsequent deltas extend message `id`. */
   cursor(id: string): void {
@@ -200,35 +255,61 @@ export class TurnTextComposer {
   snapshot(id: string | undefined, text: string): void {
     const key = id ?? this.target ?? "";
     if (this.target === null) this.target = key;
+    this.endRun(key);
     this.texts.set(key, foldStreamText(this.texts.get(key) ?? "", text).answer);
   }
 
   /** A token delta for the message the cursor last named. */
   delta(text: string): void {
     const key = this.target ?? "";
-    this.texts.set(key, (this.texts.get(key) ?? "") + text);
+    const current = this.texts.get(key) ?? "";
+    const run = this.runs.get(key) ?? { base: current, deltas: "" };
+    run.deltas += text;
+    this.runs.set(key, run);
+    this.texts.set(key, current + text);
   }
 
-  get text(): string {
+  /** Compose the per-message texts in order of first appearance, separated by a
+   *  blank line (they are separate bubbles in the real client), with `transform`
+   *  applied to each first. */
+  private compose(transform: (key: string, text: string) => string): string {
     let composed = "";
-    for (const text of this.texts.values()) {
-      if (!text) continue;
+    for (const [key, text] of this.texts) {
+      const message = transform(key, text);
+      if (!message) continue;
       if (!composed) {
-        composed = text;
+        composed = message;
         continue;
       }
       // M365 can replay the same logical response under a new messageId. While
       // that replay is growing it is a prefix of the response already composed;
       // once complete it may equal or extend it. Treat those shapes as one
       // message so neither buffered nor live output repeats the whole answer.
-      if (composed.startsWith(text)) continue;
-      if (text.startsWith(composed)) {
-        composed = text;
+      if (composed.startsWith(message)) continue;
+      if (message.startsWith(composed)) {
+        composed = message;
         continue;
       }
-      composed += `\n\n${text}`;
+      composed += `\n\n${message}`;
     }
     return composed;
+  }
+
+  get text(): string {
+    return this.compose((_key, text) => text);
+  }
+
+  /** The turn's text once it has ended: `text`, with what M365's
+   *  post-processing stripped from a message put back from its deltas
+   *  (restoreStrippedBrackets) wherever they line up. */
+  get finalText(): string {
+    return this.compose((key, text) => {
+      const run = this.runs.get(key);
+      const open = run?.deltas ? run.base + run.deltas : "";
+      const kept = this.longestRun.get(key) ?? "";
+      const raw = open.length > kept.length ? open : kept;
+      return raw ? (restoreStrippedBrackets(raw, text) ?? text) : text;
+    });
   }
 }
 
@@ -495,13 +576,20 @@ export class CopilotSession {
 
       // Fold a token delta OR a full-text snapshot into `answer` and stream the
       // newly-appended suffix (see foldStreamText for the prefix-safe rules).
+      // `streamed` is everything handed to the stream so far: what M365's
+      // post-processing stripped from the final snapshot can only be sent to
+      // the client if it extends what the stream already carried.
+      let streamed = "";
       const advance = (next: string) => {
         const r = foldStreamText(answer, next);
         if (r.answer !== answer) {
           answer = r.answer;
           receivedContent = true;
         }
-        if (r.emit) onDelta(r.emit);
+        if (r.emit) {
+          streamed += r.emit;
+          onDelta(r.emit);
+        }
       };
 
       const stream: CopilotStream = {
@@ -649,8 +737,28 @@ export class CopilotSession {
         }
       });
 
+      // Once the turn ends the composer is authoritative: on either transport
+      // the deltas restore what M365's post-processing stripped from the final
+      // snapshot (restoreStrippedBrackets). The part of it the stream hasn't
+      // carried yet goes out as one last delta, when it extends what did.
+      const settleAnswer = () => {
+        const final = composer.finalText;
+        if (final !== composer.text) {
+          log.info("Restored text M365 stripped from the final snapshot ([word]: tokens) from the deltas");
+        }
+        if (!final || final === answer) return;
+        answer = final;
+        receivedContent = true;
+        if (final.length > streamed.length && final.startsWith(streamed)) {
+          const rest = final.slice(streamed.length);
+          streamed = final;
+          onDelta(rest);
+        }
+      };
+
       ws.on("close", () => {
         clearAbort();
+        settleAnswer();
         log.info("WS closed, answer length:", answer.length);
         log.debug("Final response:", trunc(answer, 1000));
         onDone();

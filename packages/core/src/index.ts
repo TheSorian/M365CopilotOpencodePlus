@@ -90,6 +90,7 @@ export {
   FRAMING_VARIANT_NAMES,
   buildSpecMap,
   longHeredocAsWrite,
+  strippedTypeMember,
   type TranscriptStyle,
 } from "./fenced.js";
 

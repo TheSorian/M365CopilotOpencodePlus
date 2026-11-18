@@ -154,6 +154,46 @@ export function longHeredocAsWrite(
   };
 }
 
+// A static .NET member reference with its type gone: `[regex]::Replace(` after
+// M365's post-processing deleted `[regex]:` (restoreStrippedBrackets in
+// session.ts) reads `:Replace(`. PowerShell has no such syntax — a leading colon
+// only starts a loop label (`:outer foreach …`) — so the match IS the damage.
+// Not after a word character (`$env:Path`, `Env:Path`), a colon or `]`
+// (`[System.IO.File]::Exists(` is whole), a closer, quote, `$` or `[`.
+const STRIPPED_TYPE_MEMBER = /(?<![\w:\]})'"`$[])(:[A-Za-z_]\w*)(?=[(.),;]|[ \t]*(?:\r?\n|$))/m;
+
+/** The damaged member reference (e.g. `:Replace`) in a PowerShell call that
+ *  M365 stripped a `[Type]:` from, or null. Run as it reads, such a command can
+ *  destroy data: `$new = :Replace($old, …)` sets `$new` to nothing, and the
+ *  `Set-Content` after it writes that over the file (§40 F111). Only checked
+ *  where the harness's shell is PowerShell (shellDialect). */
+export function strippedTypeMember(
+  call: ParsedToolCall,
+  tools: ToolDef[] | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const shell = tools?.length ? findShellTool(tools) : undefined;
+  if (!shell || shellDialect(shell, platform) !== "powershell") return null;
+  let args: unknown;
+  try {
+    args = JSON.parse(call.function.arguments);
+  } catch {
+    return null;
+  }
+  const strings: string[] = [];
+  const collect = (v: unknown): void => {
+    if (typeof v === "string") strings.push(v);
+    else if (Array.isArray(v)) v.forEach(collect);
+    else if (v && typeof v === "object") Object.values(v).forEach(collect);
+  };
+  collect(args);
+  for (const s of strings) {
+    const m = STRIPPED_TYPE_MEMBER.exec(s);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 /** The harness tool (if any) that runs a shell command — the target for ```bash routing. */
 export function findShellTool(tools: ToolDef[]): ToolDef | undefined {
   return tools.find((t) => SHELL_TOOL_NAME.test(t.function.name)) ??
@@ -387,7 +427,9 @@ HOST PLATFORM: Windows. The \`${shell.function.name}\` tool runs PowerShell on a
 - edit in place: \`(Get-Content f) -replace 'old','new' | Set-Content f\`
 - text matching: use the \`-replace\` and \`-match\` operators. If you must call a .NET
   method, spell the type in full (\`[System.Text.RegularExpressions.Regex]::Replace(...)\`),
-  never a bare \`[regex]::…\`
+  never a bare \`[regex]::…\`: this chat deletes a one-word type name in square
+  brackets when a colon follows it, even inside code, and what arrives is
+  \`:Replace(...)\` - which runs as nothing and can empty the file
 - inspect: \`Get-Content\` / \`Get-ChildItem\` / \`Select-String\`
 - paths use \`\\\` and may contain spaces — quote them.
 

@@ -11,6 +11,7 @@ import {
   shellDialect,
   findWriteTool,
   longHeredocAsWrite,
+  strippedTypeMember,
   currentFramingVariant,
   defaultFramingForTone,
   defaultFramingForModel,
@@ -1015,5 +1016,39 @@ describe("multi-line string values in a header-only fence (#82)", () => {
     const write: ToolDef = { type: "function", function: { name: "write", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } } } };
     const { calls } = parseFencedToolCalls("```write\npath: a.txt\nhello\nworld\n```", buildSpecMap([write]));
     expect(JSON.parse(calls[0].function.arguments)).toEqual({ path: "a.txt", content: "hello\nworld" });
+  });
+});
+
+describe("strippedTypeMember (a PowerShell [Type]:: M365 stripped, §40 F111)", () => {
+  const call = (command: string) => ({
+    id: "c",
+    type: "function" as const,
+    function: { name: "shell", arguments: JSON.stringify({ command }) },
+  });
+
+  it("finds the member whose type was deleted", () => {
+    expect(strippedTypeMember(call("$u = :Replace($c, 'a', 'b')\nSet-Content f $u"), [powershell], "win32")).toBe(":Replace");
+    expect(strippedTypeMember(call("if (:IsNullOrWhiteSpace($t)) { 'empty' }"), [powershell], "win32")).toBe(":IsNullOrWhiteSpace");
+    expect(strippedTypeMember(call("$nl = :NewLine"), [powershell], "win32")).toBe(":NewLine");
+  });
+
+  it("leaves whole type names, scopes, drives and labels alone", () => {
+    for (const command of [
+      "$u = [regex]::Replace($c, 'a', 'b')",
+      "[System.IO.File]::Exists('a')",
+      "$env:Path; $script:count = 1; Get-Item Env:PATH; cd C:\\work",
+      ":outer foreach ($x in 1..3) { break outer }",
+      "Write-Output \"time: $(Get-Date)\"",
+    ]) expect(strippedTypeMember(call(command), [powershell], "win32"), command).toBeNull();
+  });
+
+  it("only judges a PowerShell shell", () => {
+    // The dialect comes from the harness's own tool, not from the host: pi on
+    // Windows ships Git Bash under a tool named `bash`, where `:Replace` is a
+    // syntax error the harness reports, not damage silence would hide.
+    expect(strippedTypeMember(call("$u = :Replace($c, 'a', 'b')"), [bash], "win32")).toBeNull();
+    // A tool that declares nothing takes the host's native shell.
+    expect(strippedTypeMember(call("$u = :Replace($c, 'a', 'b')"), [unlabelledShell], "win32")).toBe(":Replace");
+    expect(strippedTypeMember(call("$u = :Replace($c, 'a', 'b')"), [unlabelledShell], "linux")).toBeNull();
   });
 });

@@ -5882,3 +5882,27 @@ three turns in a row came back `InternalError` with no content (one through
 `ModelSession`, two through a spare instance), `numUserMessagesInConversation` 1 and 2 of
 600, so not the message counter. Also seen in §38 F96 and bursty by nature — re-run in a
 fresh window rather than reading anything into it.
+
+**Corrected, and ported whole (2026-11-18).** The prior above was wrong in the one case
+that matters: `foldStreamText` keeps the LONGER text, and a short reply often arrives only
+as its final snapshot — longer than anything the deltas built, and already post-processed.
+So the mutilated copy won, and their 305 lines were not redundant. Ported as `fc998f4`:
+
+- `restoreStrippedBrackets` + `TurnTextComposer.finalText`: each message's longest
+  delta-built text is aligned with its final text allowing ONLY `[word]:`-deletions, and
+  the model's text plus the tail only the final carried becomes the turn's answer
+  (`settleAnswer`, both transports). The stream gets the restored tail as one last delta
+  when it extends what was already sent.
+- `strippedTypeMember` (`core/fenced.ts`): a PowerShell tool call still holding `:Member(`
+  is not run. The handler asks once, in the same conversation, for full dotted type names,
+  then fails closed with 502 `damaged_tool_call`.
+- the Windows host note now says why: `-replace`/`-match`, or the full type name, because
+  this chat deletes a one-word type name in brackets when a colon follows it.
+
+Tests: 4 for the restore (including the "final longer than the deltas" shape) and 3 for
+the damaged-member detector; suite 520 → 527. The live-probe half is still unmeasured —
+H40d: their rate was 4 of 4 in-place PowerShell edits on Codex/Windows, while our pi host
+runs Git Bash (POSIX), so the case we would see is the Python `-> list[Item]:` one. The
+debug log now prints "Restored text M365 stripped…" whenever the restore fires, so a hit
+shows up without diffing anything.
+
