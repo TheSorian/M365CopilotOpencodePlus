@@ -455,8 +455,8 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // The same two shapes in Spanish: the model answers in the user's language,
   // and "no puedo generar archivos en esta sesión" went through as an answer
   // while the English twin was caught (F80/F97's lesson, again).
-  /(?:no\s+puedo|no\s+soy\s+capaz\s+de|no\s+me\s+es\s+posible|me\s+es\s+imposible|me\s+resulta\s+imposible)\s+(?:directamente\s+)?(?:generar|producir|exportar|crear|hacer|guardar)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+|ning[uú]n\s+|ninguna\s+)?(?:archivos?|ficheros?|documentos?|pdfs?)/i,
-  /(?:no\s+puedo|no\s+soy\s+capaz\s+de|no\s+me\s+es\s+posible)\b[^.\n]{0,60}\b(?:en|durante)\s+(?:esta|la)\s+(?:sesi[oó]n(?:\s+actual)?|conversaci[oó]n|chat)\b/i,
+  /(?:no\s+puedo|no\s+soy\s+capaz\s+de|no\s+me\s+es\s+posible|me\s+es\s+imposible|me\s+resulta\s+imposible)\s+(?:directamente\s+)?(?:generar|producir|exportar|crear|hacer|guardar)(?:\s+(?:ni|o|y)\s+\w+)?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+|ning[uú]n\s+|ninguna\s+)?(?:archivos?|ficheros?|documentos?|pdfs?)/i,
+  /(?:no\s+puedo|no\s+soy\s+capaz\s+de|no\s+me\s+es\s+posible)\b[^.\n]{0,60}\b(?:en|durante)\s+(?:esta|la|este)\s+(?:sesi[oó]n(?:\s+actual)?|conversaci[oó]n|chat|entorno)\b/i,
   /paste\s+(?:the\s+)?(?:contents?|files?|code|them)/i,
   /provide\s+(?:the\s+)?(?:contents?|files?)/i,
   /(?:environment|shell|tool)\s+(?:isn.?t|is not|aren.?t|are not|appears? to be)\s+(?:return|provid|respond|work|access)/i,

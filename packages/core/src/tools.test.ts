@@ -440,6 +440,9 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Mis herramientas de edición no están disponibles aquí. Por favor crea el archivo calc.py tú mismo.")).toBe(true);
     expect(looksLikeConfabulation("No puedo directamente editar archivos en este entorno. Por favor pega el contenido de test.py.")).toBe(true);
     expect(looksLikeConfabulation("Reinicia la tarea en una sesión con herramientas habilitadas.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo generar ni adjuntar el archivo .pptx en esta sesión porque la creación de archivos descargables está deshabilitada actualmente.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo generar el archivo PowerPoint descargable en este entorno.")).toBe(true);
+    expect(looksLikeConfabulation("No puedo generar ni adjuntar el archivo .pptx en este entorno.")).toBe(true);
   });
 
   it("does NOT flag Spanish normal summaries or legitimate prose", () => {
