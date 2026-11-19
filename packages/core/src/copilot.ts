@@ -312,6 +312,12 @@ export function isIncludedOpusModel(model: string): boolean {
 //   the same dead route, 4/4 across a premium and a non-premium account, while
 //   the same tone agent-less answers as GPT-6 (§22 F45, #41). Its bench score
 //   (24/30, §17) was measured agent-less.
+// - `Gpt_6_Astra_Reasoning` is the same shape, measured 2026-11-19 (§46):
+//   agent attached = REGISTERED_BUT_DEAD (BotConnection, `result:
+//   InternalError`) on the paid scenario, agent-less = DeepLeo, self-ID "GPT-6
+//   reasoning model". It is NOT in PREMIUM_ONLY_AGENT_TONES, so without this
+//   entry every tool request to `gpt-6-astra` 502s while the same model answers
+//   chat — the only advertised model that did that in the 37-ID sweep.
 // - Tones in PREMIUM_ONLY_AGENT_TONES take the agent only on a premium
 //   account; on a non-premium one it's the same dead route, learned at runtime.
 //
@@ -319,6 +325,7 @@ export function isIncludedOpusModel(model: string): boolean {
 // on BOTH kinds of account before deciding which side it belongs on.
 export const AGENTLESS_TOOL_TONES: ReadonlySet<string> = new Set([
   "Gpt_6_Reasoning",
+  "Gpt_6_Astra_Reasoning",
 ]);
 
 /**

@@ -156,6 +156,11 @@ describe("which tool requests carry the tool agent", () => {
     expect(usesAgent("gpt-6-think-deeper")).toBe(false);
   });
 
+  it("keeps GPT-6 Astra off the agent too — same dead route, measured 2026-11-19 (§46)", () => {
+    expect(AGENTLESS_TOOL_TONES.has("Gpt_6_Astra_Reasoning")).toBe(true);
+    expect(usesAgent("gpt-6-astra")).toBe(false);
+  });
+
   it("keeps every Claude model but Opus off the agent, mapped or not", () => {
     for (const id of ["claude", "claude-sonnet", "claude-sonnet-5", "claude-sonnet-5.5", "claude-sonnet-5[1m]", "claude-sonnet-think-deeper", "claude-haiku-9"]) {
       expect(usesAgent(id)).toBe(false);
