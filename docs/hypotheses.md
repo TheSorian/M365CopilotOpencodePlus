@@ -6049,9 +6049,10 @@ plugin attached". Ran 2026-11-18: the tone answered the probe's prompt agent-les
 limit. The fallback stays as insurance; it has still never fired here.
 
 
-## 45. Nov 19 2026 - the new GPT-6.2/Astra tones on our (included) account
+## 45. Nov 19 2026 - the new GPT-6.2/Astra tones on our (premium, adif.es) account
 Upstream added gpt-6.2-sol, gpt-6.2-astra and gpt-6-astra in §44. Before mapping them here we
-probed each tone on OUR account (one turn, agent-less, DeepLeo = real registered tone, the
+probed each tone on OUR account (`gsanz@adif.es`, which **is** Microsoft 365 Copilot Premium — see
+`ESTADO.md` and F114; one turn, agent-less, DeepLeo = real registered tone, the
 invalid-tone control was rejected - so an answer means the tone is live, not a silent fallback).
 All three answered: Gpt_62_Sol_Reasoning and Gpt_62_Astra_Reasoning on the included scenario,
 Gpt_6_Astra_Reasoning on the paid one (where it self-IDs as the GPT-6 reasoning model, Dec 2025).
@@ -6111,35 +6112,41 @@ same cell is DeepLeo and self-IDs as "GPT-6 reasoning model". It is not in
 Fixed by adding it beside `Gpt_6_Reasoning` (+ unit test). After the rebuild, `gpt-6-astra` with a
 `bash` tool returns `bash {"command":"ls -la"}` in 6.1 s.
 `gpt-6.2-astra` was never affected: it is NOT in `PREMIUM_ONLY_AGENT_TONES`, so no fallback
-exists for it — and it answered with a tool call, which means its agent route serves on this
-non-premium account (§46b).
+exists for it — and it answered with a tool call, which means its agent route serves on our
+**premium** account (`gsanz@adif.es`; see F114).
 **Lesson for the sweep:** a tool-less `pong` does not test the path a coding agent uses. Any future
 model sweep should send one turn with a tool offered, not just text.
 
 ### F113 — the tool sweep: 25 of 37 IDs tool-call; `gpt-6-astra` was the only broken one 🟢
 `model-probe.mjs --tools` sends one turn per (tone, scenario) route with a `bash` tool offered and
-asks for a directory listing. 2026-11-19, all 23 routes, gap 3.5 s, no throttle:
+asks for a directory listing. 2026-11-19, all 23 routes on `gsanz@adif.es` (premium account), gap 3.5 s, no throttle:
 
 | verdict | IDs | routes |
 |---|---|---|
 | `TOOL_CALL` | 25 | every GPT-5.x/GPT-6.x route, both scenarios, plus `magic` |
 | `ERROR_502` | 9 | the dead Claude tones (`Claude_Sonnet`, `Claude_Sonnet_5`, `Claude_Opus` @ paid) |
-| `SOLO_PREMIUM` | 2 | `claude-opus-4.8` / `-4.5` (Opus 4.8 on a non-premium account) |
+| `SOLO_PREMIUM` | 2 | `claude-opus-4.8` / `-4.5` — proxy labels any `InternalError` on Opus 4.8 as non-premium (`model_route_unavailable`), but on `gsanz@adif.es` (premium) this is the same tenant-level Anthropic block |
 | `TEXT_ONLY` | 1 | `claude-sonnet-think-deeper` — answers from `/mnt/data`, its own code interpreter, never calls `bash` |
 
 So `gpt-6-astra` was **the only working model that died on tools**, and it was alone in that: the
 audit of `toneUsesToolAgent` over all 37 IDs leaves exactly two GPT-6 tones agent-less
-(`Gpt_6_Reasoning`, `Gpt_6_Astra_Reasoning`); the 6.0/6.1 Sol tones carry the agent but are in
-`PREMIUM_ONLY_AGENT_TONES`, so the handler learns the dead route and re-sends agent-less.
+(`Gpt_6_Reasoning`, `Gpt_6_Astra_Reasoning`); the 6.0/6.1 Sol tones carry the agent and serve with
+it on this premium account (F114), and fall back agent-less via `PREMIUM_ONLY_AGENT_TONES` on non-premium accounts.
 `claude-sonnet-think-deeper` is the other one that does not tool-call, but it does not fail either:
 it is the house model with a code interpreter, and it works there instead of in the harness (§21).
 
-### F114 — GPT-6.2 tones DO serve with the tool agent on a non-premium account 🟡 (observed, n=1 each)
-`Gpt_62_Sol_Reasoning` and `Gpt_62_Astra_Reasoning` are neither agent-less nor premium-only, so
-`requestUsesAgent` attaches the agent, and **no fallback can rescue them** (the re-send path is gated
-on `PREMIUM_ONLY_AGENT_TONES`). Both answered a tool request 200 with `bash {"command":"ls -la"}`
-(8.9 s and 7.3 s, 2026-11-19), so on this account the agent route serves GPT-6.2 even though it is
-dead for GPT-6 / GPT-6.1 Sol. That scopes the older claim "with the agent attached GPT-6 is a dead
-route on every account" to the 6.0/6.1 tones. Probe to confirm: `agent-tone-probe.mjs
---tones=Gpt_62_Sol_Reasoning,Gpt_62_Astra_Reasoning --baseline`, and the same on a premium account
-before generalising — one turn per tone is the whole cost.
+### F114 — `gsanz@adif.es` IS premium; GPT-6.2 tones serve with the agent there 🟢 (observed, n=1 each)
+Earlier notes in §45–§46 misread `claude-opus-4.8`'s `model_route_unavailable` (`InternalError`) as
+"non-premium account". `agent-tone-probe.mjs` on `gsanz@adif.es` (2026-11-19, agent attached)
+settled that directly: all four GPT-6.x Sol/Astra tones answered `origin=DeepLeo` and
+`agentTag=3PDeclarativeAgent`:
+
+- `Gpt_6_Sol_Reasoning` (8.2 s) and `Gpt_61_Sol_Reasoning` (9.5 s) — these ONLY serve with the agent on a **premium** account (§23, §27).
+- `Gpt_62_Sol_Reasoning` (8.1 s) and `Gpt_62_Astra_Reasoning` (7.5 s) — neither is in `AGENTLESS_TOOL_TONES` or `PREMIUM_ONLY_AGENT_TONES`, and both serve with the agent on this premium account.
+
+So on `gsanz@adif.es`: (1) the account is full Copilot Premium (`OfficeWebPaidCopilot` works and
+agent-attached GPT-6.0/6.1/6.2 Sol/Astra all serve); (2) Claude is dead because Anthropic is
+disabled at the enterprise tenant / EU Data Boundary level, not for lack of a license; and
+(3) whether GPT-6.2 also needs `PREMIUM_ONLY_AGENT_TONES` on a **non-premium** account is still
+untested. Note that `Gpt_6_Reasoning` and `Gpt_6_Astra_Reasoning` still reject the agent even on
+this premium account and must stay in `AGENTLESS_TOOL_TONES`.
