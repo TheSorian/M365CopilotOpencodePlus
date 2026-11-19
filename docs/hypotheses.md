@@ -6064,3 +6064,53 @@ deliberately NOT mapped here - it would advertise GPT-5 under a Claude name. Sel
 this account are noisy (GPT-5.5 itself gave June 2024 and sometimes "Unknown"), so the verdict
 rests on contentOrigin plus the invalid-tone control, not the model name in the reply.
 Mapped: gpt-6.2-sol, gpt-6.2-astra, gpt-6-astra. Not mapped: claude-fable / claude-fable-5.1.
+
+
+## 46. Nov 19 2026 — every advertised model ID, probed through the proxy
+`scripts/model-probe.mjs` (new) reads `/v1/models` from the running proxy and sends one `pong` turn
+per ROUTE, not per ID: the 37 advertised IDs collapse to 23 `(tone, scenario)` pairs, so aliases are
+probed once and inherit the verdict (23 upstream turns instead of 37 — the throttle counts turns,
+§24 F58). 2.5 s apart, account `gsanz@adif.es`, proxy built from `3c31256`.
+
+**26 IDs answered, 11 did not — every one of them Claude:**
+
+- Dead: `claude`, `claude-sonnet`, `claude-sonnet-4.5`, `claude-sonnet-4.6`, `claude-sonnet-5.5`,
+  `claude-sonnet-5`, `claude-opus`, `claude-opus-5`, `claude-opus-5.5`, `claude-opus-4.8`,
+  `claude-opus-4.5`. At the proxy: 502 `upstream_empty_response`. On the wire: the BotConnection
+  apology plus `result: InternalError`. Reproduced agent-less (`tone-check.mjs`, both scenarios) and
+  with the agent (`agent-tone-probe.mjs`: 4/4 REGISTERED_BUT_DEAD, `InternalError`, **no**
+  `UNLICENSED`) — so this is the route serving nothing, not a scenario/entitlement refusal, and
+  `Gpt_6_Reasoning@paid` answered with the agent in the same sweep, so the paid scenario is fine.
+  Consistent with §45: Claude is unavailable on this account.
+- `claude-sonnet-think-deeper` (`Claude_Sonnet_Reasoning`) DOES answer — DeepLeo, 5–31 s, `pong`
+  returned — but it self-IDs as "GPT-5 chat model", and on an account where both Claude chat routes
+  are BotConnection-dead and self-ID is noisy (§45) that is "a model answered", not "Claude
+  answered". Treat it as the house model until something distinguishes it.
+- `Anthropic_Claude` is rejected outright (validator error), `Claude_Fable` answers as GPT-5 (§45).
+
+**So the advertised list is honest about routes and silent about entitlement:** 11 of 37 IDs are
+served by a client picker and 502 on use, and the proxy cannot know without spending a turn. A picker
+that hides them (or names them "unavailable on this account") is the only honest fix.
+
+`gpt-6-think-deeper` re-checked by hand the same day, because it is the one paid-scenario tone that
+matters here: one turn with a `bash` tool offered came back in 7.4 s with a parsed tool call
+(`bash {"command":"ls -la"}`), so the paid scenario serves it AND the fenced/shell-routing path works
+on it — it is usable as an agent, not just as a chat model. Its self-ID ("GPT-5 chat model, cutoff
+2024-06") is the same noise GPT-5.5 gives on this account (§45), so the name in the reply is not
+evidence either way; the tool call is.
+
+### F112 — `gpt-6-astra` was chat-only: it was missing from `AGENTLESS_TOOL_TONES` 🟢 (fixed)
+The sweep above only sent a tool-less `pong`, so it scored `gpt-6-astra` as fine. With a `bash` tool
+offered it 502s (`upstream_empty_response`) **2/2**, while `gpt-6-think-deeper` tool-calls in ~7 s on
+the same prompt — the only advertised model that answered chat and died on tools.
+Cause, confirmed by `agent-tone-probe.mjs --baseline`: `Gpt_6_Astra_Reasoning` was not in
+`AGENTLESS_TOOL_TONES`, so a tool request attached the Copilot Studio agent, and that is the dead
+route for GPT-6 tones (`REGISTERED_BUT_DEAD`, BotConnection, `result: InternalError`); agent-less the
+same cell is DeepLeo and self-IDs as "GPT-6 reasoning model". It is not in
+`PREMIUM_ONLY_AGENT_TONES` either, so there was no runtime fallback to save it.
+Fixed by adding it beside `Gpt_6_Reasoning` (+ unit test). After the rebuild, `gpt-6-astra` with a
+`bash` tool returns `bash {"command":"ls -la"}` in 6.1 s.
+`gpt-6.2-astra` was never affected: it IS in `PREMIUM_ONLY_AGENT_TONES`, so on this non-premium
+account the handler learns the agent route is dead and re-sends agent-less (tool call, 200).
+**Lesson for the sweep:** a tool-less `pong` does not test the path a coding agent uses. Any future
+model sweep should send one turn with a tool offered, not just text.
