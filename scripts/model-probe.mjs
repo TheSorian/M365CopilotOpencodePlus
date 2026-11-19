@@ -24,6 +24,21 @@ const arg = (name, dflt) => {
   return hit ? hit.slice(name.length + 3) : dflt;
 };
 const GAP_MS = Number(arg("gap-ms", 2500));
+const WITH_TOOLS = args.includes("--tools");
+// §46 F112: a tool-less `pong` does not test the path a coding agent uses —
+// gpt-6-astra answered chat and 502'd on every tool request. `--tools` offers
+// one `bash` tool and asks for a listing, which is what a harness actually does.
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "bash",
+      description: "Execute a shell command in the project root",
+      parameters: { type: "object", properties: { command: { type: "string", description: "the command" } }, required: ["command"] },
+    },
+  },
+];
+const PROMPT = WITH_TOOLS ? "List the files in the current directory." : "Reply with exactly the single word: pong";
 const OUT = arg("out", join(process.cwd(), "scripts", "tone-out", `models-${new Date().toISOString().replace(/[:.]/g, "-")}`));
 
 const list = await (await fetch(`${BASE}/models`)).json();
@@ -44,9 +59,13 @@ console.log(`[model] ${routes.length} distinct routes → one turn each\n`);
 
 function verdictOf(status, body) {
   const text = (body?.choices?.[0]?.message?.content ?? "").trim();
+  const calls = body?.choices?.[0]?.message?.tool_calls ?? [];
   const code = body?.error?.code ?? "";
   const msg = body?.error?.message ?? (typeof body === "string" ? body.slice(0, 160) : "");
-  if (status === 200) return text ? "OK" : "OK_EMPTY";
+  if (status === 200) {
+    if (WITH_TOOLS) return calls.length ? "TOOL_CALL" : text ? "TEXT_ONLY" : "OK_EMPTY";
+    return text ? "OK" : "OK_EMPTY";
+  }
   if (status === 429) return code.includes("priority") || /quota|credit|budget/i.test(msg) ? "SIN_CUOTA" : "THROTTLED";
   if (status === 400) return "CONTEXTO";
   if (status === 502) {
@@ -67,9 +86,10 @@ for (const [route, rep] of routes) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: rep,
-        messages: [{ role: "user", content: "Reply with exactly the single word: pong" }],
+        messages: [{ role: "user", content: PROMPT }],
+        ...(WITH_TOOLS ? { tools: TOOLS } : {}),
         stream: false,
-        max_tokens: 64,
+        max_tokens: 256,
       }),
       signal: AbortSignal.timeout(180000),
     });
@@ -77,9 +97,11 @@ for (const [route, rep] of routes) {
     let body;
     try { body = JSON.parse(raw); } catch { body = raw; }
     const text = (body?.choices?.[0]?.message?.content ?? "").trim();
+    const calls = body?.choices?.[0]?.message?.tool_calls ?? [];
     row = {
       route, rep, status: res.status, verdict: verdictOf(res.status, body),
       reply: text.slice(0, 60),
+      toolCall: calls[0]?.function ? `${calls[0].function.name} ${calls[0].function.arguments}`.slice(0, 90) : "",
       error: body?.error ? `${body.error.code ?? ""} ${String(body.error.message ?? "").slice(0, 140)}` : "",
       servedModel: body?.model ?? "",
       elapsedMs: Date.now() - started,

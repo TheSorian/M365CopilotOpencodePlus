@@ -6110,7 +6110,36 @@ same cell is DeepLeo and self-IDs as "GPT-6 reasoning model". It is not in
 `PREMIUM_ONLY_AGENT_TONES` either, so there was no runtime fallback to save it.
 Fixed by adding it beside `Gpt_6_Reasoning` (+ unit test). After the rebuild, `gpt-6-astra` with a
 `bash` tool returns `bash {"command":"ls -la"}` in 6.1 s.
-`gpt-6.2-astra` was never affected: it IS in `PREMIUM_ONLY_AGENT_TONES`, so on this non-premium
-account the handler learns the agent route is dead and re-sends agent-less (tool call, 200).
+`gpt-6.2-astra` was never affected: it is NOT in `PREMIUM_ONLY_AGENT_TONES`, so no fallback
+exists for it — and it answered with a tool call, which means its agent route serves on this
+non-premium account (§46b).
 **Lesson for the sweep:** a tool-less `pong` does not test the path a coding agent uses. Any future
 model sweep should send one turn with a tool offered, not just text.
+
+### F113 — the tool sweep: 25 of 37 IDs tool-call; `gpt-6-astra` was the only broken one 🟢
+`model-probe.mjs --tools` sends one turn per (tone, scenario) route with a `bash` tool offered and
+asks for a directory listing. 2026-11-19, all 23 routes, gap 3.5 s, no throttle:
+
+| verdict | IDs | routes |
+|---|---|---|
+| `TOOL_CALL` | 25 | every GPT-5.x/GPT-6.x route, both scenarios, plus `magic` |
+| `ERROR_502` | 9 | the dead Claude tones (`Claude_Sonnet`, `Claude_Sonnet_5`, `Claude_Opus` @ paid) |
+| `SOLO_PREMIUM` | 2 | `claude-opus-4.8` / `-4.5` (Opus 4.8 on a non-premium account) |
+| `TEXT_ONLY` | 1 | `claude-sonnet-think-deeper` — answers from `/mnt/data`, its own code interpreter, never calls `bash` |
+
+So `gpt-6-astra` was **the only working model that died on tools**, and it was alone in that: the
+audit of `toneUsesToolAgent` over all 37 IDs leaves exactly two GPT-6 tones agent-less
+(`Gpt_6_Reasoning`, `Gpt_6_Astra_Reasoning`); the 6.0/6.1 Sol tones carry the agent but are in
+`PREMIUM_ONLY_AGENT_TONES`, so the handler learns the dead route and re-sends agent-less.
+`claude-sonnet-think-deeper` is the other one that does not tool-call, but it does not fail either:
+it is the house model with a code interpreter, and it works there instead of in the harness (§21).
+
+### F114 — GPT-6.2 tones DO serve with the tool agent on a non-premium account 🟡 (observed, n=1 each)
+`Gpt_62_Sol_Reasoning` and `Gpt_62_Astra_Reasoning` are neither agent-less nor premium-only, so
+`requestUsesAgent` attaches the agent, and **no fallback can rescue them** (the re-send path is gated
+on `PREMIUM_ONLY_AGENT_TONES`). Both answered a tool request 200 with `bash {"command":"ls -la"}`
+(8.9 s and 7.3 s, 2026-11-19), so on this account the agent route serves GPT-6.2 even though it is
+dead for GPT-6 / GPT-6.1 Sol. That scopes the older claim "with the agent attached GPT-6 is a dead
+route on every account" to the 6.0/6.1 tones. Probe to confirm: `agent-tone-probe.mjs
+--tones=Gpt_62_Sol_Reasoning,Gpt_62_Astra_Reasoning --baseline`, and the same on a premium account
+before generalising — one turn per tone is the whole cost.
