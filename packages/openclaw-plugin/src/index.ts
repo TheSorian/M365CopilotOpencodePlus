@@ -40,12 +40,18 @@ export interface OpenClawConfig {
 }
 
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  "gpt-6.2-sol": "GPT-6.2 Sol",
+  "gpt-6.2-astra": "GPT-6.2 Astra",
+  "gpt-6-astra": "GPT-6 Astra",
   "gpt-6-think-deeper": "GPT-6 Think Deeper",
   "gpt-6-sol": "GPT-6.0 Sol",
   "gpt-6.1-sol": "GPT-6.1 Sol",
   "gpt-5.6-think-deeper": "GPT-5.6 Think Deeper",
   "gpt-5.6": "GPT-5.6 Quick",
   "gpt-5.6-quick": "GPT-5.6 Quick",
+  "gpt-5.5": "GPT-5.5 Quick",
+  "gpt-5.5-quick": "GPT-5.5 Quick",
+  "gpt-5.5-think-deeper": "GPT-5.5 Think Deeper",
   "m365-copilot": "M365 Copilot (Auto)",
   "auto": "M365 Auto",
   "quick": "GPT Quick",
@@ -68,10 +74,14 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const REASONING_MODELS = new Set([
+  "gpt-6.2-sol",
+  "gpt-6.2-astra",
+  "gpt-6-astra",
   "gpt-6-think-deeper",
   "gpt-6-sol",
   "gpt-6.1-sol",
   "gpt-5.6-think-deeper",
+  "gpt-5.5-think-deeper",
   "think-deeper",
   "gpt-5.4", "gpt-5.4-think-deeper",
   "gpt-5.3-think-deeper",

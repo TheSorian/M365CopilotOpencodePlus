@@ -54,18 +54,21 @@ Commits propios recientes (todos pusheados):
   prefijo `default` y detección de rendiciones (`950a93c`, `5909734`), y
   documentación asociada (`1b2000f`, `1a6fb9d`).
 
-## Pruebas en vivo que se hicieron (cuenta incluida del usuario)
+## Pruebas en vivo que se hicieron (cuenta PREMIUM del usuario - adif.es)
 
-Sondas secuenciales con `scripts/_probe-chat.mjs` + `getToken()` (borradas
-después). Veredicto = `contentOrigin: DeepLeo`; el control con tono inventado
-fue rechazado, así que una respuesta significa que el tono es real.
+La cuenta tiene licencia completa Microsoft 365 Copilot Premium (soporte de escenario
+de pago `OfficeWebPaidCopilot`, cuotas de prioridad y ejecución de agentes de Copilot
+Studio verificados en vivo). La falta de respuesta en Claude se debe a restricciones de
+proveedores de terceros (Anthropic) por políticas del tenant/EU Data Boundary, no a
+falta de licencia.
+
+Sondas secuenciales con `scripts/_probe-chat.mjs` + `getToken()`:
+- `Gpt_6_Reasoning` (`gpt-6-think-deeper`) @ pago → DeepLeo (pong recibido OK).
+- `Gpt_6_Sol_Reasoning` y `Gpt_61_Sol_Reasoning` con agente de Copilot Studio → DeepLeo (solo funciona en cuentas Premium).
 - `Gpt_62_Sol_Reasoning` y `Gpt_62_Astra_Reasoning` @ incluido → DeepLeo.
 - `Gpt_6_Astra_Reasoning` @ pago → DeepLeo, se identifica como GPT-6 (dic 2025).
-- `Claude_Fable` @ incluido y pago → DeepLeo, pero GPT-5 / jun 2024.
-- `Claude_Sonnet`, `Claude_Opus` @ ambos → BotConnection (muerto).
-- Ojo: los self-ID de corte de conocimiento en esta cuenta son ruidosos (GPT-5.5
-  dio "June 2024" y a veces "Unknown"), así que el veredicto no se apoya en el
-  nombre que dice la respuesta.
+- `Claude_Sonnet`, `Claude_Opus` → BotConnection disculpa (restringido por tenant/política de empresa para Anthropic).
+- `Claude_Fable` → DeepLeo, pero redirige internamente a GPT-5 / jun 2024.
 
 ## Cosas útiles para seguir
 
