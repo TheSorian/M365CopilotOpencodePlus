@@ -34,8 +34,26 @@
           "attachment": false,
           "limit": { "context": 1000000, "output": 128000 }
         },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5 (premium seat)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "claude-sonnet-5.5": {
+          "name": "Claude Sonnet 5.5 (premium seat, 80/day)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "claude-opus": {
+          "name": "Claude Opus 5.5 (premium seat, 40/day)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
         "claude-opus-4.8": {
-          "name": "Claude Opus 4.8",
+          "name": "Claude Opus 4.8 (premium seat, no quota)",
           "tool_call": true,
           "attachment": false,
           "limit": { "context": 1000000, "output": 128000 }
@@ -52,14 +70,44 @@
           "attachment": false,
           "limit": { "context": 1000000, "output": 128000 }
         },
+        "gpt-5.6": {
+          "name": "GPT-5.6 (fast — weak at tool calls)",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
         "gpt-5.6-think-deeper": {
           "name": "GPT-5.6 (reasoning)",
           "tool_call": true,
           "attachment": false,
           "limit": { "context": 1000000, "output": 128000 }
         },
+        "gpt-6-sol": {
+          "name": "GPT-6 Sol",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
         "gpt-6.1-sol": {
           "name": "GPT-6.1 Sol",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-6.2-sol": {
+          "name": "GPT-6.2 Sol",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-6.2-astra": {
+          "name": "GPT-6.2 Astra",
+          "tool_call": true,
+          "attachment": false,
+          "limit": { "context": 1000000, "output": 128000 }
+        },
+        "gpt-6-astra": {
+          "name": "GPT-6 Astra (premium seat)",
           "tool_call": true,
           "attachment": false,
           "limit": { "context": 1000000, "output": 128000 }
