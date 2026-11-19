@@ -1127,6 +1127,45 @@ describe("a question call wrapped in XML instead of a fence", () => {
   it("does not invent a question call when the harness has no question tool", () => {
     expect(parseToolCalls('<question>{"questions":[{"question":"¿Qué color?"}]}</question>', []).toolCalls).toHaveLength(0);
   });
+
+  it("lee un payload JSON desnudo que ocupa toda la respuesta", () => {
+    const payload = {
+      questions: [{
+        question: "Which behaviour should be corrected?",
+        header: "Objective",
+        options: [
+          { label: "The chat does not open", description: "Y or Q does nothing." },
+          { label: "Messages are not sent", description: "They only appear locally." },
+        ],
+        multiple: false,
+      }],
+    };
+    const result = parseToolCalls(JSON.stringify(payload), questionTool);
+
+    expect(result.hasToolCalls).toBe(true);
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].function.name).toBe("question");
+    expect(JSON.parse(result.toolCalls[0].function.arguments)).toEqual(payload);
+    expect(result.textContent).toBeNull();
+  });
+
+  it("envuelve un array de preguntas desnudo en el objeto questions", () => {
+    const questions = [{ question: "Elige una.", header: "Opción", options: [] }];
+    const result = parseToolCalls(JSON.stringify(questions), questionTool);
+
+    expect(result.hasToolCalls).toBe(true);
+    expect(JSON.parse(result.toolCalls[0].function.arguments)).toEqual({ questions });
+  });
+
+  it("no convierte JSON en pregunta sin la herramienta o fuera de la respuesta", () => {
+    const noTool = parseToolCalls('{"questions":[]}', []);
+    const embedded = parseToolCalls('Example: {"questions":[]}', questionTool);
+    const other = parseToolCalls('{"other":[]}', questionTool);
+
+    expect(noTool.hasToolCalls).toBe(false);
+    expect(embedded.hasToolCalls).toBe(false);
+    expect(other.hasToolCalls).toBe(false);
+  });
 });
 
 describe("a call the model rewrites after replaying its whole preamble", () => {

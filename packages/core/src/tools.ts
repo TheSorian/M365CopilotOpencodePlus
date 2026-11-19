@@ -719,28 +719,34 @@ export function textAfterFirstToolCall(text: string, tools?: ToolDef[]): string 
 }
 
 /**
- * Tolerance parser for an XML-like question wrapper chat models emit instead of
- * the instructed Markdown fence:
+ * Tolerance parser for a question call that ignored the instructed Markdown
+ * fence and emitted the arguments directly instead:
  *
  *   <question>{"questions":[...]}</question>
  *   <questions>{"questions":[...]}</questions>
+ *   {"questions":[...]}
+ *   [{"question":...}, ...]
  *
- * Strict on purpose: the wrapper must be the whole reply, a question tool must
- * exist, and `questions` must really be an array — otherwise an XML example in
- * prose becomes a tool call.
+ * One duplicated opening angle bracket is accepted as well. Keep this strict:
+ * the payload must occupy the complete response, a compatible question tool
+ * must be present, and `questions` must actually be an array. This prevents
+ * ordinary XML/JSON examples in prose from becoming tool calls.
  */
-function parseWrappedQuestionCall(text: string, tools: ToolDef[] | undefined): ParsedToolCall | null {
+function parseQuestionCall(text: string, tools: ToolDef[] | undefined): ParsedToolCall | null {
   if (!tools?.length) return null;
   const questionTool = tools.find((tool) =>
     /^(question|questions|ask_user|ask)$/i.test(tool.function.name),
   );
   if (!questionTool) return null;
 
-  const match = /^\s*<{1,2}(question|questions)>\s*([\s\S]*?)\s*<\/\1>\s*$/i.exec(text);
-  if (!match) return null;
+  const wrapped = /^\s*<{1,2}(question|questions)>\s*([\s\S]*?)\s*<\/\1>\s*$/i.exec(text);
+  // A bare JSON payload is accepted only when it is the whole response — the
+  // shape M365 sometimes emits for `question` (live gpt-5.4 log, 2026-11-18).
+  const payload = wrapped ? wrapped[2] : /^\s*[[\{]/.test(text) ? text.trim() : null;
+  if (payload === null) return null;
 
   try {
-    const decoded = JSON.parse(match[2]);
+    const decoded = JSON.parse(payload);
     const args = Array.isArray(decoded) ? { questions: decoded } : decoded;
     if (
       !args ||
@@ -774,9 +780,9 @@ export function parseToolCalls(text: string, tools?: ToolDef[]): ParseResult {
     }
   }
 
-  const wrappedQuestion = parseWrappedQuestionCall(text, tools);
-  if (wrappedQuestion) {
-    return { hasToolCalls: true, toolCalls: [wrappedQuestion], textContent: null };
+  const looseQuestion = parseQuestionCall(text, tools);
+  if (looseQuestion) {
+    return { hasToolCalls: true, toolCalls: [looseQuestion], textContent: null };
   }
 
   // The spec map carries the shell aliases too, so a JSON call naming a leaked
