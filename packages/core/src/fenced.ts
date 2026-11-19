@@ -534,6 +534,9 @@ export function defaultFramingForTone(tone?: string): string | undefined {
   if (tone === "Gpt_6_Reasoning") return "relay_batch";
   if (tone === "Gpt_6_Sol_Reasoning") return "relay_batch";
   if (tone === "Gpt_61_Sol_Reasoning") return "relay_batch";
+  if (tone === "Gpt_62_Sol_Reasoning") return "relay_batch";
+  if (tone === "Gpt_62_Astra_Reasoning") return "relay_batch";
+  if (tone === "Gpt_6_Astra_Reasoning") return "relay_batch";
   return undefined;
 }
 

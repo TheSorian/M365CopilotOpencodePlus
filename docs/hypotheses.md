@@ -6047,3 +6047,20 @@ here: this account has not yet refused an agent-less prompt because of the plugi
 plugin attached". Ran 2026-11-18: the tone answered the probe's prompt agent-less with Bing attached
 (result Success, no InputTokenLimitExceeded), so on this account the plugin does not push it over the
 limit. The fallback stays as insurance; it has still never fired here.
+
+
+## 45. Nov 19 2026 - the new GPT-6.2/Astra tones on our (included) account
+Upstream added gpt-6.2-sol, gpt-6.2-astra and gpt-6-astra in §44. Before mapping them here we
+probed each tone on OUR account (one turn, agent-less, DeepLeo = real registered tone, the
+invalid-tone control was rejected - so an answer means the tone is live, not a silent fallback).
+All three answered: Gpt_62_Sol_Reasoning and Gpt_62_Astra_Reasoning on the included scenario,
+Gpt_6_Astra_Reasoning on the paid one (where it self-IDs as the GPT-6 reasoning model, Dec 2025).
+They are mapped, unmetered (Sol/Astra) and paid-scenario (6 Astra), with relay_batch framing like
+their GPT-6.x siblings. Unbenched.
+Claude is NOT available on this account: Claude_Sonnet and Claude_Opus give the BotConnection
+apology on both scenarios, and Claude_Fable answers but self-IDs as GPT-5 / June 2024 on both
+scenarios (the real Fable self-IDs as Claude Fable 5.1 / June 2026 per §44 F122). So Fable is
+deliberately NOT mapped here - it would advertise GPT-5 under a Claude name. Self-ID cutoffs on
+this account are noisy (GPT-5.5 itself gave June 2024 and sometimes "Unknown"), so the verdict
+rests on contentOrigin plus the invalid-tone control, not the model name in the reply.
+Mapped: gpt-6.2-sol, gpt-6.2-astra, gpt-6-astra. Not mapped: claude-fable / claude-fable-5.1.

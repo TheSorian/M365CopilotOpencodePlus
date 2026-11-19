@@ -252,6 +252,25 @@ describe("GPT-6.1 Sol routing (§27)", () => {
   });
 });
 
+describe("GPT-6.2 Sol/Astra and GPT-6 Astra (§44, live on our account)", () => {
+  it("maps the GPT-6.2 tones to the INCLUDED scenario, unmetered", () => {
+    for (const id of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+      expect(getToneForModel(id)).toBe(id.endsWith("sol") ? "Gpt_62_Sol_Reasoning" : "Gpt_62_Astra_Reasoning");
+      expect(getAvailableModels()).toContain(id);
+      expect(PAID_SCENARIO_TONES.has(getToneForModel(id))).toBe(false);
+      expect(getScenarioForModel(id)).toEqual(INCLUDED);
+      expect(meteredBudgetOf(id)).toBeNull();
+    }
+  });
+
+  it("gates GPT-6 Astra on the paid scenario", () => {
+    expect(getToneForModel("gpt-6-astra")).toBe("Gpt_6_Astra_Reasoning");
+    expect(getAvailableModels()).toContain("gpt-6-astra");
+    expect(PAID_SCENARIO_TONES.has("Gpt_6_Astra_Reasoning")).toBe(true);
+    expect(getScenarioForModel("gpt-6-astra")).toEqual(PAID);
+  });
+});
+
 describe("Opus routing", () => {
   afterEach(() => {
     delete process.env.M365_SCENARIO;

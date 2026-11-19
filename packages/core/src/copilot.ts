@@ -130,6 +130,20 @@ const MODEL_TONES: Record<string, string> = {
   // sibling (`Gpt_61_Sol`, `Gpt_61_Sol_Chat`, `Gpt_61_Reasoning`, …) is rejected.
   "gpt-6.1-sol": "Gpt_61_Sol_Reasoning",
 
+  // GPT-6.2 Sol and GPT-6.2 Astra (the web client's picker since 2026-11-17;
+  // Astra is marked "Uses credits"). Live on our account on the INCLUDED
+  // scenario (one turn each, DeepLeo, 2026-11-19): both answer, as does
+  // gpt-6.1-sol, so they stay out of PAID_SCENARIO_TONES like it. Self-ID is
+  // unreliable on this account (both say GPT-5 / June 2024, as does GPT-5.5
+  // itself), so verdict = DeepLeo, not the model name the reply claims.
+  // `Gpt_6_Astra_Reasoning` is the usage-billed GPT-6 Astra: on the paid
+  // scenario it self-IDs as the GPT-6 reasoning model (December 2025), which
+  // is why it joins PAID_SCENARIO_TONES. The picker replaced it with 6.2 Astra
+  // on 2026-11-17, but the tone still serves.
+  "gpt-6.2-sol": "Gpt_62_Sol_Reasoning",
+  "gpt-6.2-astra": "Gpt_62_Astra_Reasoning",
+  "gpt-6-astra": "Gpt_6_Astra_Reasoning",
+
   // GPT-5.4. Bare `gpt-5.4` has always been the reasoning tone (unlike its
   // siblings); only the `-quick` alias moved, from the retired `Gpt_5_4_Quick`.
   "gpt-5.4": "Gpt_5_4_Reasoning",
@@ -220,6 +234,7 @@ export const PAID_SCENARIO_TONES: ReadonlySet<string> = new Set([
   "Claude_Opus",
   "Claude_Sonnet_5",
   "Gpt_6_Reasoning",
+  "Gpt_6_Astra_Reasoning",
 ]);
 
 /**
