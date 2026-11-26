@@ -6255,3 +6255,17 @@ upstream para ese caso se adaptó y se documentó in situ.
 **Falsador.** Un follow-up con count 1 que se devuelva al cliente sin reenvío; un
 comando de example cuya instrucción de forcing se pierda en el reenvío; una
 conversación inactiva 3 h que se evicte.
+
+## 51. Nov 26 2026 - sondas de diagnóstico portadas
+
+Del upstream se trajeron, sin cambios de runtime: `scripts/chathub-tones.mjs` (tabla
+del selector del cliente web), `scripts/metering-probe.mjs` (presupuestos en el wire),
+`scripts/quota-{day.sh,direct.mjs,log.mjs,probe.sh}` (el estudio del cupo diario) y
+`scripts/cot-probe.mjs` (cómo llega el chain of thought). Solo lectura: no se ejecutan
+en los tests salvo los dos ficheros `*.test.mjs`, que son offline.
+
+**Verificación.** `pnpm test`: 608 tests (17 nuevos). Ninguna sonda se ha ejecutado
+contra M365 en este traspaso: cada turno que gastan cuenta contra el cupo real.
+
+**Falsador.** Una sonda que importe un símbolo que nuestro `core` no exporta, o que
+gasturnos al cargar el módulo.

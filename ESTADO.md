@@ -15,7 +15,7 @@ API, y toda frase de rendición nueva debe detectarse también en castellano.
 ## Estado actual
 
 Rama `main`, sincronizada con `origin/main`. Árbol limpio. Build y suite verdes:
-**591 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
+**608 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
 `dist/`).
 
 Commits propios recientes (todos pusheados):
@@ -74,6 +74,10 @@ Commits propios recientes (todos pusheados):
   divergencia portada**: nuestro reintento de respuesta vacía ya reenvía el prompt
   completo en vez de "Please continue.", así que el test de opening no respondido se
   adaptó a ese comportamiento. Ver §50.
+
+- Del original (`upstream scripts/`): sondas de solo lectura `chathub-tones.mjs`,
+  `metering-probe.mjs`, `quota-{day.sh,direct.mjs,log.mjs,probe.sh}` y `cot-probe.mjs`,
+  con sus 2 tests offline. 17 tests nuevos. No gastan cupo si no se ejecutan.
 
 ### NO entró (y por qué)
 - `claude-fable` / `claude-fable-5.1`: en NUESTRA cuenta (incluida, no premium)

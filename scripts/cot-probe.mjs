@@ -7,12 +7,12 @@
 // contentOrigin / messageType / contentType, how its text arrived (snapshot
 // lengths, cursor frames naming it, deltas after such a cursor), and when it
 // arrived relative to the answer's first text. Chain of thought is the
-// `Progress` messages with `contentOrigin: "ChainOfThoughtSummary"` (API doc ┬º6).
+// `Progress` messages with `contentOrigin: "ChainOfThoughtSummary"` (API doc §6).
 //
 // Usage (inside `nix develop`, unsandboxed; one fresh conversation per model):
 //   M365_AVOID_THROTTLING=1 M365_DEBUG=1 M365_DUMP_FRAMES=1 M365_FRAME_DIR=frames-cot \
-//     node scripts/cot-probe.mjs --models claude-sonnet,gpt-5.5-think-deeper [--prompt "ÔÇª"]
-//   node scripts/cot-probe.mjs --analyze <dump.ndjson>ÔÇª   # offline, no M365 turn
+//     node scripts/cot-probe.mjs --models claude-sonnet,gpt-5.5-think-deeper [--prompt "…"]
+//   node scripts/cot-probe.mjs --analyze <dump.ndjson>…   # offline, no M365 turn
 //
 // Writes scripts/cot-probe-out/<timestamp>.json (gitignored). Each model costs
 // one M365 turn in a fresh conversation; the metered models (Opus 5.5, Sonnet
@@ -31,7 +31,7 @@ const arg = (k, def = null) => {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
 };
 
-/** The messageId a streaming `cursor` names: `$['<id>'].adaptiveCards[0]ÔÇª`. */
+/** The messageId a streaming `cursor` names: `$['<id>'].adaptiveCards[0]…`. */
 function cursorId(j) {
   const m = typeof j === "string" ? j.match(/^\$\['([^']+)'\]/) : null;
   return m ? m[1] : null;
