@@ -370,6 +370,15 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   F13's "fresh login clears it" was n=1 and confounded with a rest). It lifts with idle time,
   which is why the proxy's degradation backoff replaced the old auto-reauth. Space experiment
   runs; don't loop new conversations.
+- **A non-premium account can hit a daily turn wall, separate from the thread throttle.** Its
+  `throttling.metering` carries `TotalTurnUsageDaily` (50 on one tenant's Basic account, 999 on
+  another's; no key on premium accounts). At 0 M365 refuses with `OutOfCredits` /
+  `TotalTurnDailyQuotaExhausted` from `BotConnection`; the proxy remembers it for the whole account
+  and returns 429 `daily_turn_quota_exhausted` with `Retry-After` to midnight UTC, no fallback model,
+  no M365 turn. `usage.x_m365_total_turns_daily_remaining` reports the counter. Detection goes by the
+  `errorCode`; the text alone counts only when the turn didn't succeed, so an answer quoting the
+  refusal doesn't block the account. See API doc §7 and hypotheses §47.
+
 - The `nativeclient` OAuth redirect bounces to `/common/wrongplace`; the auth code is
   scraped from the navigation request, not a settled URL.
 

@@ -6150,3 +6150,30 @@ disabled at the enterprise tenant / EU Data Boundary level, not for lack of a li
 (3) whether GPT-6.2 also needs `PREMIUM_ONLY_AGENT_TONES` on a **non-premium** account is still
 untested. Note that `Gpt_6_Reasoning` and `Gpt_6_Astra_Reasoning` still reject the agent even on
 this premium account and must stay in `AGENTLESS_TOOL_TONES`.
+
+## 47. Nov 26 2026 - el cupo diario de turnos (`TotalTurnUsageDaily`) y su portaje
+
+**Premisa.** Nuestro proxy solo conocía el cubo por hilos (`PerUserThrottled`, F13/F58).
+El upstream midió en noviembre un segundo muro, en cuentas no premium: un cupo diario de
+turnos de la cuenta, contando también los turnos de la web, con reset a las 00:00 UTC.
+
+**Hallazgo del upstream (§61 F167, datos en su `docs/quota/`).** `throttling.metering`
+lleva `TotalTurnUsageDaily`: 50 turnos/día en la cuenta Basic de su estudio, 999 en una
+cuenta no premium de otro tenant, y ninguna clave en una cuenta premium (n=1 por
+escenario). Cada turno de texto cuesta 1; imágenes, rechazos por licencia y turnos
+StreamHub cuestan 0. A 0, `OutOfCredits` / `TotalTurnDailyQuotaExhausted` desde
+`BotConnection`, con rechazo rápido y un ~8 % de turnos que se filan. Queda abierto por qué
+un tenant tiene 50 y otro 999 (H61b, sospechan de los flags de facturación consumitiva).
+
+**Qué portamos.** Los commits `ba10843` y `1365441`: detección por `errorCode` (o por texto
+solo si el turno no tuvo éxito), clave única `account:total-turn-daily`, 429
+`daily_turn_quota_exhausted` con `Retry-After` a medianoche UTC sin gasto ni fallback, y
+`usage.x_m365_total_turns_daily_remaining` en cada respuesta con el contador. Es inofensivo
+en la cuenta premium del usuario (no hay clave ni `errorCode`), pero cubre el caso de usar
+el proxy con una cuenta Basic.
+
+**Verificación local.** `pnpm build` y `pnpm test` verdes: 556 tests (10 nuevos: 6 de core
+y 4 del handler). **No probado en vivo** contra una cuenta Basic: el rechazo se simuló con
+el `errorCode` y el contador exactos del upstream. Falsador: una cuenta no premium que
+devuelva `TotalTurnUsageDaily` pero no sea frenada por el proxy, o un rechazo con otro
+`errorCode` al agotarse el cupo.

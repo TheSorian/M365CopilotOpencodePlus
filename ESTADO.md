@@ -15,7 +15,7 @@ API, y toda frase de rendición nueva debe detectarse también en castellano.
 ## Estado actual
 
 Rama `main`, sincronizada con `origin/main`. Árbol limpio. Build y suite verdes:
-**546 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
+**556 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
 `dist/`).
 
 Commits propios recientes (todos pusheados):
@@ -34,6 +34,14 @@ Commits propios recientes (todos pusheados):
   `gpt-6-astra` → `Gpt_6_Astra_Reasoning`. Los dos primeros en escenario
   incluido y sin metro; Astra en `PAID_SCENARIO_TONES`. Los tres con
   `relay_batch` por defecto y tests en `copilot.test.ts` / `fenced.test.ts`.
+
+- Del original (`upstream ba10843` + `1365441`): cupo diario de turnos de cuentas no
+  premium. `priorityAccessExhaustionOf` reconoce `TotalTurnDailyQuotaExhausted`, el proxy lo
+  recuerda bajo una clave de cuenta, devuelve 429 `daily_turn_quota_exhausted` con
+  `Retry-After` a medianoche UTC, no prueba modelos alternativos y expone el contador en
+  `usage.x_m365_total_turns_daily_remaining`. La detección por texto solo cuenta en turnos
+  que no tuvieron éxito, para que una respuesta que cita el rechazo no bloquee la cuenta.
+  10 tests nuevos (6 en `priority-access.test.ts`, 4 en `streaming.test.ts`). Ver §47.
 
 ### NO entró (y por qué)
 - `claude-fable` / `claude-fable-5.1`: en NUESTRA cuenta (incluida, no premium)

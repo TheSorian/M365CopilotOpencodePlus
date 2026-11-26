@@ -83,6 +83,7 @@ export {
   notePriorityAccessExhausted,
   activePriorityAccessExhaustion,
   resetPriorityAccessState,
+  DAILY_TURN_LIMIT_KEY,
   type MeteredBudget,
   type PriorityAccessExhaustion,
   type PriorityAccessWindow,

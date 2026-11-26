@@ -438,6 +438,32 @@ The final `type:2` frame carries the canonical state of the whole conversation i
 - This is why we **reuse one conversation** across an agent session and send **only new messages** on follow-up turns (delta mode) — every `Please continue.` retry also counts against the 600.
 - There is also opaque **account-level throttling** (rapid-fire requests can start returning empties). It recovers on its own.
 
+### A daily turn allowance on non-premium accounts: `TotalTurnUsageDaily`
+
+On a non-premium account, each Chathub turn's `throttling.metering` map carries
+`TotalTurnUsageDaily`: the turns the account has left today, including turns made
+in the web UI. It falls by exactly 1 per text turn whatever the model, agent or
+not, follow-up or not, and resets at 00:00 UTC. Images, licence refusals and
+StreamHub turns cost nothing. The allowance differs between accounts — 50 on the
+Basic account of the upstream usage-limit study (`docs/quota/` there), 999 on a
+non-premium account in another tenant; a premium account's map has no such key.
+Read the account's own counter instead of assuming a number: the proxy surfaces
+it as `usage.x_m365_total_turns_daily_remaining`. Readings can lag, so keep the
+lowest value of the UTC day.
+
+At 0 the turn is refused from `contentOrigin: "BotConnection"` with
+`result: {value: "OutOfCredits", errorCode: "TotalTurnDailyQuotaExhausted",
+creditScenario: "TotalTurn"}` and the text "You've used your daily chat limit.
+Please try again tomorrow." Every chat model is refused alike, so the proxy
+remembers the wall under one account-wide key and answers every later chat
+request with 429 `daily_turn_quota_exhausted` and `Retry-After` to midnight UTC,
+without sending an M365 turn and without falling back to another model. Image
+generation still works past the limit. The text alone is not enough when the turn
+succeeded: an answer that *quotes* the refusal must not 429 the account. This is
+a different wall from `PerUserThrottled` (§7 below), which refills in about an
+hour. Upstream evidence: §61 F167 and the measurements in m365coder's
+`docs/quota/`; our port and checks in `docs/hypotheses.md` §47.
+
 ### Account degradation under sustained use (observed June 13 2026)
 
 A full session of heavy use (~80+ messages across probes, bench runs, and logins
