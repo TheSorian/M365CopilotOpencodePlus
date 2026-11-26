@@ -571,6 +571,20 @@ export function getScenarioForModel(model: string): ScenarioRouting {
   return routing(PAID_SCENARIO_TONES.has(getToneForModel(model)) || isSonnet55Model(model));
 }
 
+/** The included scenario: the one a non-premium account is served under. */
+export const INCLUDED_SCENARIO = DEFAULT_SCENARIO;
+
+/**
+ * The transport and `scenario`/`licenseType` pair a turn for this model goes
+ * out under: StreamHub's pair (`getStreamHubScenario`) under
+ * `M365_TRANSPORT=streamhub`, the model's own (`getScenarioForModel`) on
+ * Chathub. The session logs it as its "Routing:" line.
+ */
+export function getTurnRouting(model: string): ScenarioRouting & { transport: Transport } {
+  const transport = getTransport();
+  return { transport, ...(transport === "streamhub" ? getStreamHubScenario() : getScenarioForModel(model)) };
+}
+
 /**
  * The priority-access budget this model's turns draw on, or null when it isn't
  * metered: Opus on the paid scenario (Opus 5.5) and `Claude_Sonnet` on the paid
@@ -671,4 +685,7 @@ export interface CopilotStream {
   metering?: Record<string, number> | null;
   /** True if the model triggered a native custom action this turn (H-NATIVE-6). */
   sawAction?: boolean;
+  /** The model's chain of thought this turn (`ChainOfThoughtSummary` messages,
+   *  joined by blank lines); empty when the model sent none (§50 F149–F151). */
+  reasoning?: string;
 }

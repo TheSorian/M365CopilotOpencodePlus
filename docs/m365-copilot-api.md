@@ -464,6 +464,30 @@ a different wall from `PerUserThrottled` (§7 below), which refills in about an
 hour. Upstream evidence: §61 F167 and the measurements in m365coder's
 `docs/quota/`; our port and checks in `docs/hypotheses.md` §47.
 
+### An empty turn under a scenario the account isn't licensed for (#150)
+
+On a non-premium account, a model without a licence gate of its own asked under a
+scenario the account isn't licensed for (`officeweb` on StreamHub, or the paid
+scenario) ends `Success` with no text, no error code and only an `EarlyProgress`
+message. It does it on every retry. The proxy stops after the first turn with a
+502 `scenario_not_served` naming `M365_SCENARIO=OfficeWebIncludedCopilot`, instead
+of spending three turns and mistaking the empties for the thread-rate throttle.
+Only agent-less turns take this path: an agent's empty reply keeps the
+deleted-agent recovery. See hypotheses §61 F170/F171 upstream, §48 here.
+
+### A chain of thought the web client shows, exposed as `reasoning_content` (§50 F149–F151)
+
+M365 streams the model's reasoning as `Progress` messages with
+`contentOrigin: "ChainOfThoughtSummary"` (growing full-text snapshots; Chathub
+restates them in the final item). The proxy folds them with
+`ChainOfThoughtComposer` and emits each addition as `reasoning_content`: a delta
+in streaming, `message.reasoning_content` otherwise, tool turns included. pi and
+OpenCode show it as thinking with no setting. The other `Progress` messages
+(EarlyProgress's fixed list, sandbox actions) are left out; a rewritten snapshot
+updates the whole text but adds nothing to the stream, which cannot retract.
+`M365_NO_REASONING=1` turns it off. The debug log records each turn's chain of
+thought, which is often the reason a model refused a framing.
+
 ### Account degradation under sustained use (observed June 13 2026)
 
 A full session of heavy use (~80+ messages across probes, bench runs, and logins

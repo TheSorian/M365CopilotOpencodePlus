@@ -4,6 +4,8 @@ import {
   createLogger,
   trunc,
   getToneForModel,
+  getTurnRouting,
+  INCLUDED_SCENARIO,
   requestUsesAgent,
   isPremiumOnlyModel,
   noteAgentRouteDead,
@@ -568,6 +570,26 @@ function simpleHash(str: string): string {
   return String(hash);
 }
 
+/** M365 ended the turn `Success` without answering: no text, no error code, and
+ *  no bot message after its early progress line ("Sorting it out…"). It is all a
+ *  non-premium account gets, on either transport, for a model without a licence
+ *  gate of its own under a scenario the account isn't licensed for: `officeweb`
+ *  (StreamHub's default) or the paid scenario. Sent again it comes back the same
+ *  (11 of 11 turns over StreamHub, 5 of 5 over Chathub, Nov 23 2026; hypotheses
+ *  §61 F170, F171, issue #150). */
+function progressOnlyTurn(stream: {
+  result?: { value: string; errorCode?: string } | null;
+  hasContent: boolean;
+  fullText?: string;
+  images?: unknown[] | null;
+  reasoning?: string | null;
+  contentOrigin?: string | null;
+}): boolean {
+  return stream.result?.value === "Success" && !stream.result.errorCode &&
+    !stream.hasContent && !stream.fullText && (stream.images?.length ?? 0) === 0 &&
+    !stream.reasoning && stream.contentOrigin === "EarlyProgress";
+}
+
 /** Parse a tool-mode reply, with the document guard applied.
  *
  *  The shell-routing parser turns every ```bash block into a tool call, so a
@@ -968,6 +990,23 @@ export async function handleChatCompletion(
   // runBuffered only retries on an EMPTY attempt (Disengaged, dead-agent, throttle),
   // and an empty attempt emits no deltas — so a forwarded delta always belongs to the
   // one attempt that produced content and is never re-sent by a subsequent retry.
+  // The model's chain of thought: every turn's in this request, in order. The
+  // streaming render sends each piece as it arrives, tool turns included.
+  // M365_NO_REASONING=1 leaves it out.
+  let reasoning = "";
+  let liveReasoning: ((delta: string) => void) | null = null;
+  const reasoningSink = (): ((delta: string) => void) | undefined => {
+    if (process.env.M365_NO_REASONING) return undefined;
+    let first = true;
+    return (delta: string) => {
+      if (!delta) return;
+      if (first && reasoning) delta = `\n\n${delta}`;
+      first = false;
+      reasoning += delta;
+      liveReasoning?.(delta);
+    };
+  };
+
   async function runBuffered(
     onDelta?: (delta: string) => void,
   ): Promise<{ fullText: string } | { error: Response }> {
@@ -1015,7 +1054,7 @@ export async function handleChatCompletion(
         // The agent overrides `tone` (forces GPT-5), so tool-less requests must
         // skip it to reach the model the tone selects (e.g. Claude). See
         // ModelSession.run / docs H8.6.
-        copilotStream = await session.run(text, model, signal, useToolAgent, inputAttachments, waitForBudget);
+        copilotStream = await session.run(text, model, signal, useToolAgent, inputAttachments, waitForBudget, { onReasoning: reasoningSink() });
       } catch (err: any) {
         if (err instanceof TurnBudgetHold) return { error: turnBudgetHoldResponse(err) };
         return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
@@ -1073,6 +1112,10 @@ export async function handleChatCompletion(
       // experiment watch how close a prompt sits to Disengaged in this log.
       if (lastScores && Object.keys(lastScores).length > 0) {
         log.info(`Turn scores: ${Object.entries(lastScores).map(([k, v]) => `${k}=${v}`).join(" ")}${lastMessageType ? ` (${lastMessageType})` : ""}, cid=${session.conversationId}`);
+      }
+      // The chain of thought says why a model refused a framing (API doc §6).
+      if (copilotStream.reasoning) {
+        log.info(`Chain of thought (${copilotStream.reasoning.length} chars): ${JSON.stringify(trunc(copilotStream.reasoning, 400))}`);
       }
 
       // M365 SAYS when it throttles: the final item's result is `Throttled` /
@@ -1191,6 +1234,19 @@ export async function handleChatCompletion(
         return { error: priorityAccessResponse(exhausted, model) };
       }
 
+      // A scenario the account isn't licensed for: M365 ends the turn `Success`
+      // with nothing but a progress line, and does the same to every retry.
+      // Before #150 this went down the empty-reply path below: the prompt sent
+      // again and a "Please continue.", a 502 that blamed a content filter, and
+      // the empties counted as the thread-rate throttle (degradation backoff).
+      // Agent-less turns only: an agent's empty reply keeps the deleted-agent
+      // recovery below. Not counted toward the backoff: it isn't a throttle.
+      const routing = getTurnRouting(model);
+      if (!useToolAgent && routing.scenario !== INCLUDED_SCENARIO && progressOnlyTurn(copilotStream)) {
+        log.info(`${model} got no answer under ${routing.scenario} (${routing.transport}): a progress message and nothing else — 502, no retry (#150)`);
+        return { error: scenarioNotServedResponse(model, routing) };
+      }
+
       // M365's prompt filter can answer with a canned apology instead of a
       // Disengaged message: contentOrigin "Apology", "Sorry, it looks like I can't
       // chat about this. Let's try a different topic." It is F22's refusal with
@@ -1298,7 +1354,10 @@ export async function handleChatCompletion(
         // A dead/deleted agent returns an instant empty reply (throttle: null).
         // Re-resolve the agent once before retrying so a long-lived host
         // self-heals from the deleted-agent trap instead of looping on empties.
-        if (!agentRefreshed) {
+        // Only when this turn carried the agent: for an agent-less one the
+        // re-check cost a Power Platform round trip, and the agent ID it
+        // returned counted as a change, so the whole prompt went again (#150).
+        if (!agentRefreshed && useToolAgent) {
           agentRefreshed = true;
           const agentChanged = await session.refreshAgent();
           if (agentChanged) {
@@ -1633,16 +1692,17 @@ export async function handleChatCompletion(
   if (!body.stream) {
     const p = await produce();
     if (p.kind === "error") return p.resp;
+    const thought = reasoning ? { reasoning_content: reasoning } : {};
     if (p.kind === "tools") {
       return jsonResponse(200, {
         id: completionId, object: "chat.completion", created, model,
-        choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: p.toolCalls }, finish_reason: "tool_calls" }],
+        choices: [{ index: 0, message: { role: "assistant", content: null, ...thought, tool_calls: p.toolCalls }, finish_reason: "tool_calls" }],
         usage: usage(),
       });
     }
     return jsonResponse(200, {
       id: completionId, object: "chat.completion", created, model,
-      choices: [{ index: 0, message: { role: "assistant", content: p.text }, finish_reason: outputFinishReason(p.text) }],
+      choices: [{ index: 0, message: { role: "assistant", content: p.text, ...thought }, finish_reason: outputFinishReason(p.text) }],
       usage: usage(),
     });
   }
@@ -1669,6 +1729,11 @@ export async function handleChatCompletion(
       const hb = setInterval(() => {
         try { send({ ...base, choices: [{ index: 0, delta: {}, finish_reason: null }] }); } catch {}
       }, 15000);
+      // The chain of thought goes out as it arrives (pi and opencode show it as
+      // thinking), on tool turns too.
+      liveReasoning = (delta: string) => {
+        try { send({ ...base, choices: [{ index: 0, delta: { reasoning_content: delta }, finish_reason: null }] }); } catch {}
+      };
 
       // Synthetic proxy status, NOT model reasoning. Keep it out of content
       // and tool arguments. Clients without reasoning_content support ignore it.
@@ -2069,6 +2134,23 @@ function emptyResponseResponse(throttle: { current: number; max: number } | null
     error: {
       message: `M365 Copilot returned an empty response${detail} — likely a content filter, an invalid agent/session, or a transient upstream error.`,
       type: "upstream_empty_response",
+    },
+  });
+}
+
+/** A scenario the account isn't licensed for answered with nothing but a progress
+ *  line (progressOnlyTurn). Retrying gets the same, so say what to change. */
+function scenarioNotServedResponse(model: string, routing: { scenario: string; transport: string }): Response {
+  const via = routing.transport === "streamhub" ? "StreamHub" : "Chathub";
+  return jsonResponse(502, {
+    error: {
+      message:
+        `M365 Copilot gave no answer to ${model} under the ${routing.scenario} scenario over ${via}: the turn ` +
+        `ended as a success with only a progress message, no text and no error. A non-premium account gets ` +
+        `this under a scenario it isn't licensed for. Set M365_SCENARIO=${INCLUDED_SCENARIO}, the scenario ` +
+        `such an account is served under.`,
+      type: "upstream_error",
+      code: "scenario_not_served",
     },
   });
 }

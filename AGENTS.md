@@ -370,6 +370,18 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   F13's "fresh login clears it" was n=1 and confounded with a rest). It lifts with idle time,
   which is why the proxy's degradation backoff replaced the old auto-reauth. Space experiment
   runs; don't loop new conversations.
+- **The proxy passes M365's chain of thought through as `reasoning_content`** (§50
+  F149–F151): `ChainOfThoughtSummary` progress snapshots are folded and streamed as
+  each piece arrives, tool turns included; OpenCode shows them as thinking. It is not
+  the synthetic "The model is thinking internally…" waiting indicator, which still
+  exists for GPT-6 Sol tones. `M365_NO_REASONING=1` leaves the real one out. The debug
+  log records it, often explaining why a turn refused a framing.
+
+- **An empty `Success` with only an `EarlyProgress` message off the included scenario
+  is a licence problem, not a transient.** The proxy stops after one turn with 502
+  `scenario_not_served` naming `M365_SCENARIO=OfficeWebIncludedCopilot`, on agent-less
+  turns only; it doesn't feed the degradation backoff. See API doc §7.
+
 - **A non-premium account can hit a daily turn wall, separate from the thread throttle.** Its
   `throttling.metering` carries `TotalTurnUsageDaily` (50 on one tenant's Basic account, 999 on
   another's; no key on premium accounts). At 0 M365 refuses with `OutOfCredits` /

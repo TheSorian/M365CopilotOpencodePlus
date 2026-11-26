@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 // Replace core's ModelSession with a scripted fake so we can exercise the handler's
 // streaming path with no auth/WebSocket. Everything else in core stays real.
@@ -34,7 +34,11 @@ const scripted: {
   awaitTurnBudgetCalls: Array<{ maxWaitMs?: number; signal?: AbortSignal }>;
   /** The `waitForBudget` argument of every run() call, in order (one function per call). */
   budgetWaits: Array<(() => Promise<unknown>) | undefined>;
-} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, models: [], images: [], gate: null, signals: [], stoppedAfter: null, budgetHold: null, awaitTurnBudgetCalls: [], budgetWaits: [] };
+  /** How many times the handler re-checked the tool agent (refreshAgent). */
+  refreshAgents: number;
+  /** Chain of thought the fake turn emits through `turn.onReasoning`, in pieces. */
+  reasoning?: string[];
+} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, models: [], images: [], gate: null, signals: [], stoppedAfter: null, budgetHold: null, awaitTurnBudgetCalls: [], budgetWaits: [], refreshAgents: 0 };
 
 vi.mock("@m365-copilot/core", async (importActual) => {
   const actual = await importActual<typeof import("@m365-copilot/core")>();
@@ -45,8 +49,9 @@ vi.mock("@m365-copilot/core", async (importActual) => {
     conversationId = "conv-test";
     reset() {}
     newConversation() { this.conversationId = "conv-test-2"; this.turnCount = 0; scripted.newConversations++; }
-    async refreshAgent() { return false; }
-    async run(text: string, model?: string, signal?: AbortSignal, useAgent?: boolean, images: string[] = [], waitForBudget?: () => Promise<unknown>) {
+    async refreshAgent() { scripted.refreshAgents++; return false; }
+    async run(text: string, model?: string, signal?: AbortSignal, useAgent?: boolean, images: string[] = [], waitForBudget?: () => Promise<unknown>, turn?: { onReasoning?: (delta: string) => void }) {
+      if (turn?.onReasoning && scripted.reasoning) for (const piece of scripted.reasoning) turn.onReasoning(piece);
       if (scripted.gate) await scripted.gate;
       scripted.budgetWaits.push(waitForBudget);
       scripted.models.push(model ?? "");
@@ -102,7 +107,7 @@ vi.mock("@m365-copilot/core", async (importActual) => {
 const servedBy: number[] = [];
 
 const { handleChatCompletion, SessionPool, ChatCompletionRequest, periodicToolReminderDue, patchReminderDue, proxyCallOrdinal } = await import("./index.js");
-const { resetAgentRoutes, resetPriorityAccessState, TurnBudgetHold, noteWebSearchOverflow, toneUsesWebSearch, resetWebSearchOverflow } =
+const { resetAgentRoutes, resetPriorityAccessState, TurnBudgetHold, noteWebSearchOverflow, toneUsesWebSearch, resetWebSearchOverflow, isDegradationBackoff, noteRequestOutcome } =
   await import("@m365-copilot/core");
 
 // The proxy remembers a priority-access wall for the process (until the reset);
@@ -1176,6 +1181,142 @@ describe("Opus 4.8 on an account that can't serve it (§24, §36)", () => {
     const res = await respond(body);
     expect(res.status).toBe(502);
     expect((await res.json()).error.type).toBe("upstream_empty_response");
+  });
+});
+
+describe("Chain of thought as reasoning_content (§50 F149-F151)", () => {
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+  afterEach(() => {
+    scripted.reasoning = undefined;
+    delete process.env.M365_NO_REASONING;
+    scripted.queue = [];
+    scripted.result = null;
+  });
+
+  const ask = async (stream = false, withTools = false) => handleChatCompletion(
+    ChatCompletionRequest.parse({
+      model: "gpt-5.5", stream, ...(withTools ? { tools } : {}),
+      messages: [{ role: "user", content: `explain ${Math.random()}` }],
+    }), new SessionPool(),
+  );
+
+  it("returns the model's chain of thought in a non-streamed answer", async () => {
+    scripted.reasoning = ["I'll check ", "the failing test."];
+    scripted.queue = [{ fullText: "The assertion expects 5." }];
+    const message = (await (await ask()).json()).choices[0].message;
+    expect(message.content).toBe("The assertion expects 5.");
+    expect(message.reasoning_content).toBe("I'll check the failing test.");
+  });
+
+  it("streams it as reasoning_content deltas, including on a tool turn", async () => {
+    scripted.reasoning = ["Let me look ", "at the files."];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }];
+    const res = await ask(true, true);
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    const chunks = raw.split("\n").filter((l) => l.startsWith("data: ") && l !== "data: [DONE]").map((l) => JSON.parse(l.slice(6)));
+    const thought = chunks.map((c) => c.choices?.[0]?.delta?.reasoning_content ?? "").join("");
+    expect(thought).toBe("Let me look at the files.");
+    expect(chunks.some((c) => c.choices?.[0]?.delta?.tool_calls?.length)).toBe(true);
+  });
+
+  it("M365_NO_REASONING=1 leaves it out entirely", async () => {
+    process.env.M365_NO_REASONING = "1";
+    scripted.reasoning = ["hidden"];
+    scripted.queue = [{ fullText: "Answer." }];
+    const message = (await (await ask()).json()).choices[0].message;
+    expect(message.reasoning_content).toBeUndefined();
+  });
+});
+
+describe("A scenario the account isn't licensed for: a progress line and nothing else (#150)", () => {
+  // What a non-premium account gets for an ungated model under `officeweb` or the
+  // paid scenario: `Success`, no text, an EarlyProgress message (hypotheses §61 F170).
+  const PROGRESS_ONLY = { fullText: "", contentOrigin: "EarlyProgress", messageType: "Progress" };
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+  const ENV = ["M365_TRANSPORT", "M365_SCENARIO", "M365_NO_BACKOFF", "M365_NO_AUTO_REAUTH"] as const;
+  const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
+
+  beforeEach(() => {
+    for (const k of ENV) delete process.env[k]; // the backoff must be live to show it isn't started
+    scripted.refreshAgents = 0;
+  });
+  afterEach(() => {
+    for (const k of ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    scripted.queue = [];
+    noteRequestOutcome(false, "");
+  });
+
+  async function send(model: string, { stream = false, withTools = false } = {}) {
+    scripted.models = [];
+    scripted.agentFlags = [];
+    scripted.queue = [PROGRESS_ONLY, PROGRESS_ONLY, PROGRESS_ONLY];
+    return respond(ChatCompletionRequest.parse({
+      model, stream, ...(withTools ? { tools } : {}),
+      messages: [{ role: "user", content: `hello ${Math.random()}` }],
+    }));
+  }
+
+  it("stops after one turn over StreamHub's default scenario, says what to set, and doesn't start the throttle backoff", async () => {
+    process.env.M365_TRANSPORT = "streamhub";
+    for (let i = 0; i < 3; i++) {
+      const res = await send("gpt-5.5");
+      expect(res.status).toBe(502);
+      const err = (await res.json()).error;
+      expect(err.code).toBe("scenario_not_served");
+      expect(err.message).toContain("under the officeweb scenario over StreamHub");
+      expect(err.message).toContain("M365_SCENARIO=OfficeWebIncludedCopilot");
+      expect(scripted.models).toEqual(["gpt-5.5"]);
+    }
+    expect(scripted.refreshAgents).toBe(0);
+    expect(isDegradationBackoff()).toBe(false);
+  });
+
+  it("…a tool request over StreamHub too, which never carries the agent there", async () => {
+    process.env.M365_TRANSPORT = "streamhub";
+    const res = await send("gpt-5.5", { withTools: true });
+    expect((await res.json()).error.code).toBe("scenario_not_served");
+    expect(scripted.agentFlags).toEqual([false]);
+  });
+
+  it("streams it as an error chunk", async () => {
+    process.env.M365_TRANSPORT = "streamhub";
+    const res = await send("m365-copilot", { stream: true });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    const chunks = raw.split("\n").filter((l) => l.startsWith("data: ") && l !== "data: [DONE]").map((l) => JSON.parse(l.slice(6)));
+    expect(chunks.find((c) => c.error)?.error.code).toBe("scenario_not_served");
+    expect(scripted.models).toEqual(["m365-copilot"]);
+  });
+
+  it("does the same over Chathub when M365_SCENARIO names a scenario other than the included one", async () => {
+    process.env.M365_SCENARIO = "OfficeWebPaidCopilot";
+    const err = (await (await send("gpt-5.6")).json()).error;
+    expect(err.code).toBe("scenario_not_served");
+    expect(err.message).toContain("under the OfficeWebPaidCopilot scenario over Chathub");
+    expect(scripted.models).toEqual(["gpt-5.6"]);
+  });
+
+  it("keeps the empty-reply retries under the included scenario, and re-checks no agent for an agent-less request", async () => {
+    for (let i = 0; i < 3; i++) {
+      const res = await send("gpt-5.5");
+      expect((await res.json()).error.type).toBe("upstream_empty_response");
+      expect(scripted.models).toHaveLength(3);
+    }
+    expect(scripted.refreshAgents).toBe(0);
+    // Our fake reuses one conversation id, so it cannot trip the 3-distinct-
+    // conversation backoff here; the point is that the path above retries.
+  });
+
+  it("leaves a request that carries the agent on the empty-reply path, with its one agent re-check", async () => {
+    process.env.M365_SCENARIO = "officeweb";
+    const res = await send("gpt-5.5", { withTools: true });
+    expect((await res.json()).error.type).toBe("upstream_empty_response");
+    expect(scripted.agentFlags).toEqual([true, true, true]);
+    expect(scripted.refreshAgents).toBe(1);
   });
 });
 

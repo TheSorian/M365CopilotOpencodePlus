@@ -44,6 +44,8 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_IMAGE_DIR=%USERPROFILE%\Pictures\m365   imágenes generadas (por defecto ~/Pictures)
     set M365_FAIL_CLOSED_CONFAB=1            502 si la negativa persiste (opt-in; por defecto 200)
     set M365_SKIP_UPDATE=1                   arranca sin buscar actualizaciones del repo propio
+    set M365_NO_REASONING=1                  no enviar el chain of thought como reasoning_content
+    set M365_LOG_MAX_BYTES=60MB              tamaño de la ventana del debug.log (por defecto 50MB)
 
 Lo del UA/locale/zona no es cosmético: el login abre un Chromium visible y, con los
 valores por defecto, la huella dice "Linux, en-GB, Copenhague" mientras el navegador

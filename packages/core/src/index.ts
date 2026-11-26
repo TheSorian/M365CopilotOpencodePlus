@@ -50,6 +50,8 @@ export {
   requestUsesAgent,
   getTransport,
   getStreamHubScenario,
+  getTurnRouting,
+  INCLUDED_SCENARIO,
   type Transport,
   noteWebSearchOverflow,
   toneUsesWebSearch,
@@ -104,6 +106,7 @@ export {
 
 export {
   CopilotSession,
+  ChainOfThoughtComposer,
   type CopilotSessionOptions,
   type ChatTurnOptions,
   type NativeActionConfig,

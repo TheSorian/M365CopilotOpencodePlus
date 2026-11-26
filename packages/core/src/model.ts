@@ -21,6 +21,14 @@ export interface ModelSessionOptions {
   temporaryChat?: boolean;
 }
 
+/** Per-turn settings a backend may use; Chat uses onReasoning. */
+export interface TurnOptions {
+  /** The request's `reasoning_effort` (the agent runtime's; Chat has none). */
+  reasoningEffort?: string;
+  /** Called with each piece of the model's chain of thought as it arrives (Chat). */
+  onReasoning?: (delta: string) => void;
+}
+
 /**
  * A stateful session for running M365 Copilot.
  * Manages auth, agent resolution, and conversation continuity.
@@ -107,6 +115,7 @@ export class ModelSession {
     useAgent: boolean = true,
     images: string[] = [],
     waitForBudget: () => Promise<{ waitedMs: number }> = () => awaitTurnBudget({ signal }),
+    turn: TurnOptions = {},
   ): Promise<CopilotStream> {
     let token = await this.resolveToken();
     // Image input (#39): upload each image for this conversation; the message points at them.
@@ -155,7 +164,7 @@ export class ModelSession {
     // the tool-calling agent path — image optionsSets are agent-less, and we don't
     // want the image tool competing with fenced tool-call emission. Opt out with
     // M365_NO_IMAGE_GEN for a pure-text agent-less turn.
-    const turnOpts = { generateImages: !agentForTurn && !process.env.M365_NO_IMAGE_GEN, images: annotations };
+    const turnOpts = { generateImages: !agentForTurn && !process.env.M365_NO_IMAGE_GEN, images: annotations, onReasoning: turn.onReasoning };
 
     try {
       return await this.copilotSession.chat(token, text, model, signal, turnOpts);

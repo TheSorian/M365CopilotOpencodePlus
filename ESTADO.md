@@ -15,7 +15,7 @@ API, y toda frase de rendición nueva debe detectarse también en castellano.
 ## Estado actual
 
 Rama `main`, sincronizada con `origin/main`. Árbol limpio. Build y suite verdes:
-**556 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
+**572 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
 `dist/`).
 
 Commits propios recientes (todos pusheados):
@@ -42,6 +42,20 @@ Commits propios recientes (todos pusheados):
   `usage.x_m365_total_turns_daily_remaining`. La detección por texto solo cuenta en turnos
   que no tuvieron éxito, para que una respuesta que cita el rechazo no bloquee la cuenta.
   10 tests nuevos (6 en `priority-access.test.ts`, 4 en `streaming.test.ts`). Ver §47.
+
+- Del original (`upstream c377501`): turno vacío con solo `EarlyProgress` bajo un
+  escenario sin licencia -> 502 `scenario_not_served` en 1 turno, sin backoff. Con
+  `getTurnRouting`/`INCLUDED_SCENARIO` en `core` y tests en `streaming.test.ts`.
+- Del original (`upstream f5e428a`): `ChainOfThoughtSummary` se emite como
+  `reasoning_content` (delta en streaming, campo en JSON, tambien en tool turns);
+  `ChainOfThoughtComposer`, `onReasoning` y `M365_NO_REASONING=1`. 6 tests nuevos
+  (`session-reasoning.test.ts`, `streaming.test.ts`) y sonda `scripts/cot-probe.mjs`.
+- Del original (`upstream 5f91e70` + `8bf264d`): debug.log circular por
+  `M365_LOG_MAX_BYTES` (50MB por defecto), corte en salto de linea y cierre del handle
+  antes del rename en Windows. 4 tests en `log.test.ts`. La rotacion de 100MB de
+  `start-m365.cmd` se mantiene como respaldo.
+- Del original (`upstream c4b2ef4`): autenticacion por ruta de contraseña cuando la
+  cuenta tiene passkey (autenticador WebAuthn vacio + pickers de AAD).
 
 ### NO entró (y por qué)
 - `claude-fable` / `claude-fable-5.1`: en NUESTRA cuenta (incluida, no premium)

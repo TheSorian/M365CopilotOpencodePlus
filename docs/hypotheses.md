@@ -6177,3 +6177,30 @@ y 4 del handler). **No probado en vivo** contra una cuenta Basic: el rechazo se 
 el `errorCode` y el contador exactos del upstream. Falsador: una cuenta no premium que
 devuelva `TotalTurnUsageDaily` pero no sea frenada por el proxy, o un rechazo con otro
 `errorCode` al agotarse el cupo.
+
+## 48. Nov 26 2026 - cuarta tanda de portajes del upstream
+
+**Premisa.** Seguir bajando el delta de `upstream` con criterio: solo lo que cambia
+comportamiento observable o evita gasto de turnos, con tests y documentación.
+
+**Qué entró.**
+- `c377501` (#150): un turns `Success` sin texto y solo `EarlyProgress` bajo un escenario
+  sin licencia se corta en 1 turno con 502 `scenario_not_served` en vez de 3 turnos y un
+  backoff falso. Requiere `getTurnRouting` y `INCLUDED_SCENARIO` en `core`; el re-check
+  del agente queda solo para turnos que llevaron agente.
+- `f5e428a` (§50 F149–F151): los `ChainOfThoughtSummary` llegan como `reasoning_content`
+  (delta y campo, tool turns incluidos), con `ChainOfThoughtComposer`, `onReasoning` desde
+  `ModelSession.run`, y `M365_NO_REASONING=1` para apagarlo. El log de debug guarda cada
+  chain of thought. El upstream lo probó en vivo en pi y OpenCode en los dos transportes.
+- `5f91e70` + `8bf264d`: ventana circular de `debug.log` (`M365_LOG_MAX_BYTES`, 50MB
+  por defecto, recorte al 160%), con cierre del handle antes del rename en Windows.
+- `c4b2ef4`: ruta de contraseña para cuentas con passkey en el login automatizado.
+
+**Verificación local.** `pnpm build` y `pnpm test` verdes: 572 tests (16 nuevos desde
+el último traspaso). `node scripts/check-ours.mjs` executed separately. **No probado en
+vivo**: el chain of thought se simuló con los frames del upstream en
+`session-reasoning.test.ts`; el passkey y el scenario sin licencia requieren otra cuenta.
+
+**Falsador.** Un `ChainOfThoughtSummary` que no llegue como `reasoning_content`, un turno
+vacío del escenario que siga costando 3 llamadas, o una cuenta con passkey que siga
+colgando en `/bridge/fido`.
