@@ -6229,3 +6229,29 @@ IQ solo se ejercita en el test de StreamHub con el frame simulado.
 **Falsador.** Un re-prompt que siga prometiendo shell con solo una tool `write`; un
 comando de ejemplo que siga ejecutándose con el guard activado; un turno StreamHub con
 `M365_WORK_IQ=0` que todavía envíe `gpts` o use `officeweb`.
+
+## 50. Nov 26 2026 - historial perdido y retención de conversaciones
+
+**Premisa.** El original midió (§46 F125–F127) que M365 no conserva openings muy
+largos (retuvo 420k caracteres, no 540k) y que el proxy evictaba conversaciones a los
+30 min de inactividad, aunque M365 las recuerda 21 h.
+
+**Qué entró.** `bca4ea4` + `29e1e4d`: TTL de 24 h (`M365_CONVERSATION_TTL_HOURS`) y
+tope de 1.000; un follow-up con `throttle.current === 1` se corta antes de forwardear
+nada y reenvía toda la historia en una conversación nueva, una vez por request. Si ya
+se streamó, el siguiente request reenvía. Solo un opening **respondido** de ≥200k
+caracteres enseña un límite de tamaño al pool (por modelo, durante el TTL); las
+reparaciones y los forcing turns conservan su instrucción detrás de la historia.
+
+**Verificación local.** `pnpm build` y `pnpm test` verdes: 591 tests (11 nuevos);
+`check-ours.mjs` OK. **No probado en vivo**: el historial perdido se simuló con un
+frame `throttle.current = 1` en la sonda de streaming. Sin benches.
+
+**Divergencia deliberada.** Nuestro reintento de turno vacío reenvía el prompt completo
+(no "Please continue."), así que un opening vacío seguido de una respuesta perdida no
+se interpreta como pérdida: el segundo intento ya lleva la historia. El test del
+upstream para ese caso se adaptó y se documentó in situ.
+
+**Falsador.** Un follow-up con count 1 que se devuelva al cliente sin reenvío; un
+comando de example cuya instrucción de forcing se pierda en el reenvío; una
+conversación inactiva 3 h que se evicte.

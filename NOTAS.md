@@ -48,6 +48,7 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_LONG_ANSWER_GUARD=1             devolver como texto una respuesta larga que termina en un comando de ejemplo
     set M365_WORK_IQ=0                       StreamHub sin busqueda automatica en OneDrive/SharePoint
     set M365_LOG_MAX_BYTES=60MB              tamaño de la ventana del debug.log (por defecto 50MB)
+    set M365_CONVERSATION_TTL_HOURS=48        horas que una conversación inactiva sigue en el pool (24)
 
 Lo del UA/locale/zona no es cosmético: el login abre un Chromium visible y, con los
 valores por defecto, la huella dice "Linux, en-GB, Copenhague" mientras el navegador

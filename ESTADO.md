@@ -15,7 +15,7 @@ API, y toda frase de rendición nueva debe detectarse también en castellano.
 ## Estado actual
 
 Rama `main`, sincronizada con `origin/main`. Árbol limpio. Build y suite verdes:
-**580 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
+**591 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
 `dist/`).
 
 Commits propios recientes (todos pusheados):
@@ -65,6 +65,15 @@ Commits propios recientes (todos pusheados):
 - Del original (`upstream 4df5a0d`): `M365_WORK_IQ=0` quita el entry BizChat y usa el
   escenario de pago en StreamHub (1 test en `session-streamhub.test.ts`). Activado por
   defecto, así que no cambia nuestro arranque.
+
+- Del original (`upstream bca4ea4` + `29e1e4d`): conversaciones 24 h
+  (`M365_CONVERSATION_TTL_HOURS`, máximo 1.000) y detección de historial perdido
+  (`numUserMessagesInConversation` 1 en un turno de continuación): se frena antes de
+  streaming y se reenvía toda la historia una vez por request; un opening respondido
+  de ≥200k caracteres enseña al pool a reenviar siempre. 11 tests nuevos. **Única
+  divergencia portada**: nuestro reintento de respuesta vacía ya reenvía el prompt
+  completo en vez de "Please continue.", así que el test de opening no respondido se
+  adaptó a ese comportamiento. Ver §50.
 
 ### NO entró (y por qué)
 - `claude-fable` / `claude-fable-5.1`: en NUESTRA cuenta (incluida, no premium)

@@ -541,6 +541,17 @@ conversation at `1/600`). Characterised behaviour:
 
 ## 8. Conversations & sessions
 
+An idle conversation stays in the proxy's pool for 24 h
+(`M365_CONVERSATION_TTL_HOURS`), at most 1,000: M365 kept one idle for 21 h, and
+evicting it makes the next request replay the whole history into a fresh M365
+conversation. M365 does not always keep a long opening: it kept a 420k-character
+one and dropped a 540k one (upstream §46 F125). A follow-up whose
+`numUserMessagesInConversation` reads 1 has lost its history; the proxy stops it
+before any of the reply reaches the client and re-sends the whole request in a
+fresh conversation, once per request. If the reply already streamed, the next
+request replays. An answered opening of ≥200k chars that was lost teaches the
+pool (per model, for the TTL) to replay histories that long every time.
+
 - A "conversation" = a stable `ConversationId` (+ `X-SessionId`). M365 keeps **server-side context** for it.
 - Each **turn opens a fresh WebSocket** (with `invocationId:"0"`), but reuses the same `ConversationId`/`sessionId`, so the server threads them together. `isStartOfSession:true` only on turn 0.
 - The local attempted-turn counter survives transport-session recreation with
