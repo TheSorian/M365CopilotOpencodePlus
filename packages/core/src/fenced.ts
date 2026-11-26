@@ -194,6 +194,21 @@ export function strippedTypeMember(
   return null;
 }
 
+/** Codex's Code Mode `exec` runs JavaScript in a V8 isolate, not a shell.
+ *  Recognised by its name, its single `input` param and its description. */
+export function isCodeModeExecTool(tool: ToolDef): boolean {
+  const props = Object.keys(tool.function.parameters?.properties ?? {});
+  return /(?:^|__|\.)exec$/i.test(tool.function.name) &&
+    props.length === 1 && props[0] === "input" &&
+    /\bJavaScript\b/.test(tool.function.description ?? "");
+}
+
+/** Explicitly recognized executors only; unlike routing, capability claims must not
+ *  infer a shell from an otherwise arbitrary tool's argument name. */
+export function findRecognizedShellTool(tools: ToolDef[]): ToolDef | undefined {
+  return tools.find((t) => SHELL_TOOL_NAME.test(t.function.name) || isCodeModeExecTool(t));
+}
+
 /** The harness tool (if any) that runs a shell command — the target for ```bash routing. */
 export function findShellTool(tools: ToolDef[]): ToolDef | undefined {
   return tools.find((t) => SHELL_TOOL_NAME.test(t.function.name)) ??

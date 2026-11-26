@@ -1240,3 +1240,35 @@ describe("millisecondArgsFixed (a sub-second millisecond argument is seconds)", 
     expect(millisecondArgsFixed(ms, undefined)).toBe(ms);
   });
 });
+
+describe("M365_LONG_ANSWER_GUARD (opt-in, off by default)", () => {
+  const bashTool = [{ type: "function" as const, function: { name: "bash", description: "run", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } } }];
+  const doc = `# Recommendations
+${"Consider a local development improvement. ".repeat(45)}
+
+\`\`\`bash
+printf example
+\`\`\``;
+  const fix = [
+    "The date parser treats %d as zero padded everywhere, so single digit days fail. ".repeat(8),
+    "",
+    "```python",
+    ...Array.from({ length: 14 }, (_, i) => `# case ${i}: a single digit day parses like its padded form\nassert parse("2026-11-${i + 1}") == parse("2026-11-${String(i + 1).padStart(2, "0")}")`),
+    "```",
+    "",
+    "```bash\nsed -i 's/%d/%e/' src/date.py && pytest -q\n```",
+  ].join("\n");
+  const flagged = (text: string) => isProseDocument(parseToolCalls(text, bashTool), text, bashTool, { longAnswers: true });
+
+  it("runs the call by default, whatever the answer's shape", () => {
+    expect(isProseDocument(parseToolCalls(doc, bashTool), doc, bashTool)).toBe(false);
+  });
+
+  it("returns a long structured answer ending in one example as prose when on", () => {
+    expect(flagged(doc)).toBe(true);
+  });
+
+  it("keeps a python block with # comments followed by a real call as an action", () => {
+    expect(flagged(fix)).toBe(false);
+  });
+});

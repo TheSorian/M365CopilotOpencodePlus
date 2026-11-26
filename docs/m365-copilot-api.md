@@ -475,6 +475,22 @@ of spending three turns and mistaking the empties for the thread-rate throttle.
 Only agent-less turns take this path: an agent's empty reply keeps the
 deleted-agent recovery. See hypotheses §61 F170/F171 upstream, §48 here.
 
+### Recovery re-prompts only assume capabilities the tools declare
+
+When a give-up forces a retry, the correction is chosen from the tools actually
+offered (`tool_choice` narrowed first). A recognised shell keeps the measured
+shell prompts byte-for-byte; without one the proxy says to use only the declared
+capabilities and re-exposes the canonical schemas. It never infers a shell from
+an arbitrary tool's argument name (`findRecognizedShellTool`). Upstream §50 F153.
+
+### A long written answer ending in one example: `M365_LONG_ANSWER_GUARD`
+
+Off by default. When on, a reply whose single call ENDS a document-length
+(≥1,500 chars) plain-text answer with a heading or a meaningful table is returned
+as text instead of running the example. A closed admission: bullets, markup, code
+and text after the call keep it an action. A false positive would eat a real
+action, so enable it only if you see an answer's trailing command being run.
+
 ### A chain of thought the web client shows, exposed as `reasoning_content` (§50 F149–F151)
 
 M365 streams the model's reasoning as `Progress` messages with
@@ -829,6 +845,11 @@ from `m365.cloud.microsoft` (browser devtools → WS frames) and diff against th
 ---
 
 ## 13. StreamHub — the new web client's transport (Nov 2026)
+
+`M365_WORK_IQ=0` sends it as the web client does with its Work IQ switch off:
+the paid scenario and no built-in `bizchat-as-gpt-scenario` entry. With Work IQ
+on (the default) M365 searches the user's OneDrive/SharePoint on its own during
+tool turns and may answer from other people's documents (upstream §64 F182).
 
 The new web client (`copilot.cloud.microsoft`) doesn't use Chathub. It talks to
 

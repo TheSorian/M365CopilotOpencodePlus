@@ -520,7 +520,7 @@ export function getTransport(): Transport {
  */
 export function getStreamHubScenario(): ScenarioRouting {
   return {
-    scenario: process.env.M365_SCENARIO ?? "officeweb",
+    scenario: process.env.M365_SCENARIO ?? (workIqEnabled() ? "officeweb" : PAID_SCENARIO),
     licenseType: process.env.M365_LICENSE_TYPE ?? PAID_LICENSE_TYPE,
   };
 }
@@ -569,6 +569,17 @@ export function getScenarioForTone(tone: string): ScenarioRouting {
 export function getScenarioForModel(model: string): ScenarioRouting {
   if (isIncludedOpusModel(model)) return routing(false);
   return routing(PAID_SCENARIO_TONES.has(getToneForModel(model)) || isSonnet55Model(model));
+}
+
+/**
+ * `M365_WORK_IQ=0` sends StreamHub turns as the web client does with its Work IQ
+ * switch off: under the paid scenario (getStreamHubScenario) and without the
+ * built-in BizChat entry (session.ts). With it on, M365 searches the user's work
+ * files on its own (hypotheses §64 F182). On unless set to 0/off/false.
+ */
+export function workIqEnabled(): boolean {
+  const v = process.env.M365_WORK_IQ?.trim().toLowerCase();
+  return !(v === "0" || v === "off" || v === "false");
 }
 
 /** The included scenario: the one a non-premium account is served under. */

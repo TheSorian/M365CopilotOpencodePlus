@@ -6204,3 +6204,28 @@ vivo**: el chain of thought se simuló con los frames del upstream en
 **Falsador.** Un `ChainOfThoughtSummary` que no llegue como `reasoning_content`, un turno
 vacío del escenario que siga costando 3 llamadas, o una cuenta con passkey que siga
 colgando en `/bridge/fido`.
+
+## 49. Nov 26 2026 - quinta tanda: recuperación, guard de respuesta larga y Work IQ
+
+**Premisa.** Terminar el lote de cambios "tal vez" del upstream que no cambian el
+default pero cubren fallos concretos.
+
+**Qué entró.**
+- `106ec97` + `29565ff`: `recoveryPrompt` elige entre los prompts medidos de shell y
+  una corrección capability-aware cuando solo hay tools de archivo/u otras; nuestro
+  `toolNudge` sigue re-exponiendo los esquemas. `findRecognizedShellTool` exige nombre
+  de ejecutor reconocido (o `exec` de Code Mode) en vez de inferirlo del parámetro.
+- `7124b7e` + `f7e36ed`: `M365_LONG_ANSWER_GUARD=1` devuelve como texto una respuesta
+  larga y estructurada cuyo único bloque es un ejemplo al final. Admisión cerrada para
+  no comerse acciones reales. **Desactivado** en el lanzador.
+- `4df5a0d`: `M365_WORK_IQ=0` omite `bizchat-as-gpt-scenario` y cambia StreamHub al
+  escenario de pago, como el cliente web con el interruptor apagado (F182). Por defecto
+  sigue encendido, así que no hay cambio en nuestro arranque.
+
+**Verificación local.** `pnpm build` y `pnpm test` verdes: 580 tests (8 nuevos);
+`check-ours.mjs` OK. **Sin benchear y sin probar en vivo**: el guard es opt-in y Work
+IQ solo se ejercita en el test de StreamHub con el frame simulado.
+
+**Falsador.** Un re-prompt que siga prometiendo shell con solo una tool `write`; un
+comando de ejemplo que siga ejecutándose con el guard activado; un turno StreamHub con
+`M365_WORK_IQ=0` que todavía envíe `gpts` o use `officeweb`.

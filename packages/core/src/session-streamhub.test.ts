@@ -70,7 +70,10 @@ async function turn(session: CopilotSession, script: unknown[], text = "hi") {
 describe("CopilotSession over StreamHub", () => {
   beforeAll(() => { process.env.M365_TRANSPORT = "streamhub"; });
   afterAll(() => { delete process.env.M365_TRANSPORT; });
-  afterEach(() => { fake.state.sockets.length = 0; });
+  afterEach(() => {
+    fake.state.sockets.length = 0;
+    delete process.env.M365_WORK_IQ;
+  });
 
   it("keeps a restated message's text once - the live long-answer shape", async () => {
     // 2026-11-11 dump (GPT-6.1 Sol, 250-word story): deltas, then a second
@@ -108,6 +111,16 @@ describe("CopilotSession over StreamHub", () => {
     expect(req.streamingMode).toBe("ConciseV2");
     expect(req.message.text).toBe("hi");
     expect(req.gpts).toEqual([{ id: "bizchat-as-gpt-scenario", source: "BuiltInAgents" }]);
+  });
+
+  it("M365_WORK_IQ=0 drops the BizChat entry and moves the turn to the paid scenario", async () => {
+    process.env.M365_WORK_IQ = "0";
+    const { ws, items } = await turn(new CopilotSession(), [
+      part({ messages: [{ author: "bot", text: "hi", messageId: "a1" }] }), end,
+    ]);
+    expect(new URL(ws.url).searchParams.get("scenario")).toBe("OfficeWebPaidCopilot");
+    const req = items.find((i: any) => i.type === "chat_request")!.chatStreamRequest;
+    expect(req.gpts).toBeUndefined();
   });
 
   it("subscribes to the same topic with action create on every turn, keeps the conversation, and skips its replay", async () => {

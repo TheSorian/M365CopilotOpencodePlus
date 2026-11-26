@@ -44,6 +44,7 @@ import {
   textAfterFirstToolCall,
   longHeredocAsWrite,
   strippedTypeMember,
+  findRecognizedShellTool,
   formatToolResponse,
   formatToolSchemas,
   formatToolChoiceInstruction,
@@ -349,6 +350,28 @@ const UNSTREAMED_BUDGET_WAIT_LIMIT_MS = 2 * 60_000;
 type ChatBody = z.infer<typeof ChatCompletionRequest>;
 type ParsedMessage = ChatBody["messages"][number];
 
+/** Adapt only existing recovery triggers, never infer a trigger from a tool name.
+ *  We keep our own `toolNudge` to re-expose the canonical schemas, so the
+ *  no-shell branch only needs the capability-aware correction. */
+function recoveryPrompt(body: ChatBody, reason: "confab" | "remote" | "halluc", everActed: boolean): string {
+  const choice = body.tool_choice;
+  const tools = typeof choice === "object"
+    ? (body.tools ?? []).filter(t => t.function.name === choice.function.name)
+    : (body.tools ?? []);
+  // Preserve the measured shell prompts byte-for-byte when shell routing is permitted.
+  if (findRecognizedShellTool(tools)) {
+    return reason === "remote" ? REMOTE_ARTIFACT_FORCE_PROMPT
+      : reason === "confab" ? (everActed ? MIDTASK_FORCE_PROMPT : CONFAB_FORCE_PROMPT)
+      : HALLUCINATION_FORCE_PROMPT;
+  }
+  if (!tools.length) return "The requested tool is not provided. Explain that limitation without claiming the action completed.";
+  return reason === "remote"
+    ? "A remote artifact or download link is not evidence that the requested change was applied. Do not offer a remote patch or artifact as a completed change; use only a provided tool whose definition supports the requested action."
+    : reason === "confab"
+      ? "Continue using only the capabilities declared by the provided tools; do not assume filesystem or shell access beyond their definitions."
+      : "No tool ran this turn. Do not claim the requested action completed without a confirming <tool_response>.";
+}
+
 /** Only a standalone command in the current user turn requests a replay. */
 function requestsContextRestore(messages: ParsedMessage[]): boolean {
   const latest = messages.at(-1);
@@ -610,7 +633,7 @@ function progressOnlyTurn(stream: {
  *  forcing retry. */
 function parseReply(text: string, tools: Parameters<typeof parseToolCalls>[1]): { parsed: ParseResult; judged: string | null } {
   const parsed = parseToolCalls(text, tools);
-  if (isProseDocument(parsed, text, tools)) {
+  if (isProseDocument(parsed, text, tools, { longAnswers: process.env.M365_LONG_ANSWER_GUARD === "1" })) {
     log.info(`Response is a prose document (${parsed.toolCalls.length} embedded fences), returning as text instead of executing`);
     const opening = text.split("```")[0].trim().split(/\n\s*\n/)[0];
     return { parsed: { hasToolCalls: false, toolCalls: [], textContent: text }, judged: opening };
@@ -1458,9 +1481,7 @@ export async function handleChatCompletion(
       if (!confab && !remoteArtifact && !halluc) break;
       const retryKind = remoteArtifact ? "Remote artifact completion" : confab ? "Confabulation" : "Hallucinated completion";
       log.info(`${retryKind} detected (no tool call) — forcing retry ${attempt + 1}/${maxConfabRetries}`);
-      text = remoteArtifact ? REMOTE_ARTIFACT_FORCE_PROMPT
-        : confab ? (everActed ? MIDTASK_FORCE_PROMPT : CONFAB_FORCE_PROMPT)
-        : HALLUCINATION_FORCE_PROMPT;
+      text = recoveryPrompt(body, remoteArtifact ? "remote" : confab ? "confab" : "halluc", everActed);
       // Without a <tools> block the model is right to refuse ("in this turn
       // there is no <tools>"), so the nudge re-exposes the framing and schemas
       // along with the instruction.

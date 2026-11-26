@@ -1229,6 +1229,37 @@ describe("Chain of thought as reasoning_content (§50 F149-F151)", () => {
   });
 });
 
+describe("Recovery prompts respect the tools that were actually offered", () => {
+  const shell = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+  const write = [{ type: "function", function: { name: "write", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } } } }];
+  const ask = async (tools: any[]) => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "I can't access the files." }, { fullText: "```bash\nls\n```" }];
+    const res = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-5.5", stream: false, tools,
+      messages: [{ role: "user", content: `check ${Math.random()}` }],
+    }), new SessionPool());
+    scripted.queue = [];
+    return { res, prompts: scripted.texts };
+  };
+  afterEach(() => { scripted.queue = []; });
+
+  it("keeps the measured shell prompt when a shell tool was offered", async () => {
+    const { prompts } = await ask(shell);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("have not run any command yet");
+  });
+
+  it("does not promise shell access when only a file tool was offered", async () => {
+    const { prompts } = await ask(write);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("capabilities declared by the provided tools");
+    expect(prompts[1]).not.toContain("```bash");
+    expect(prompts[1]).toContain("<tools>"); // our own toolNudge still re-exposes the schemas
+  });
+});
+
 describe("A scenario the account isn't licensed for: a progress line and nothing else (#150)", () => {
   // What a non-premium account gets for an ungated model under `officeweb` or the
   // paid scenario: `Success`, no text, an EarlyProgress message (hypotheses §61 F170).
@@ -2374,5 +2405,39 @@ describe("a tool response M365 sent twice in one reply", () => {
     expect(r.choices[0].message.tool_calls).toHaveLength(1);
     expect(JSON.parse(r.choices[0].message.tool_calls[0].function.arguments).command).toBe("ls");
     scripted.queue = [];
+  });
+});
+
+describe("M365_LONG_ANSWER_GUARD in the handler", () => {
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+  const doc = `# Recommendations
+${"Consider a local development improvement. ".repeat(45)}
+
+\`\`\`bash
+printf example
+\`\`\``;
+  afterEach(() => { delete process.env.M365_LONG_ANSWER_GUARD; scripted.queue = []; });
+
+  async function reply() {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: doc }];
+    const res = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-5.5", stream: false, tools,
+      messages: [{ role: "user", content: `recommend ${Math.random()}` }],
+    }), new SessionPool());
+    return (await res.json()).choices[0].message;
+  }
+
+  it("runs the trailing example by default", async () => {
+    const m = await reply();
+    expect(m.tool_calls).toHaveLength(1);
+  });
+
+  it("returns the written answer as text when enabled", async () => {
+    process.env.M365_LONG_ANSWER_GUARD = "1";
+    const m = await reply();
+    expect(m.tool_calls).toBeUndefined();
+    expect(m.content).toBe(doc);
   });
 });

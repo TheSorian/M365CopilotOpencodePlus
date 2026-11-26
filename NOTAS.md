@@ -45,6 +45,8 @@ Todos se ponen en `start-m365.cmd`, antes de la línea `node ...`:
     set M365_FAIL_CLOSED_CONFAB=1            502 si la negativa persiste (opt-in; por defecto 200)
     set M365_SKIP_UPDATE=1                   arranca sin buscar actualizaciones del repo propio
     set M365_NO_REASONING=1                  no enviar el chain of thought como reasoning_content
+    set M365_LONG_ANSWER_GUARD=1             devolver como texto una respuesta larga que termina en un comando de ejemplo
+    set M365_WORK_IQ=0                       StreamHub sin busqueda automatica en OneDrive/SharePoint
     set M365_LOG_MAX_BYTES=60MB              tamaño de la ventana del debug.log (por defecto 50MB)
 
 Lo del UA/locale/zona no es cosmético: el login abre un Chromium visible y, con los

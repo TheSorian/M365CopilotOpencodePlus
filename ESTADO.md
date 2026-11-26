@@ -15,7 +15,7 @@ API, y toda frase de rendición nueva debe detectarse también en castellano.
 ## Estado actual
 
 Rama `main`, sincronizada con `origin/main`. Árbol limpio. Build y suite verdes:
-**572 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
+**580 tests pasan** (`pnpm build` antes de `pnpm test`; los tests importan de
 `dist/`).
 
 Commits propios recientes (todos pusheados):
@@ -56,6 +56,15 @@ Commits propios recientes (todos pusheados):
   `start-m365.cmd` se mantiene como respaldo.
 - Del original (`upstream c4b2ef4`): autenticacion por ruta de contraseña cuando la
   cuenta tiene passkey (autenticador WebAuthn vacio + pickers de AAD).
+
+- Del original (`upstream 106ec97` + `29565ff`): los re-prompts de recuperación
+  eligen el texto según las tools ofrecidas y `findRecognizedShellTool` no infiere un
+  shell de un argumento cualquiera. 2 tests en `streaming.test.ts`.
+- Del original (`upstream 7124b7e` + `f7e36ed`): `M365_LONG_ANSWER_GUARD`, apagado por
+  defecto; 5 tests entre `tools.test.ts` y `streaming.test.ts`.
+- Del original (`upstream 4df5a0d`): `M365_WORK_IQ=0` quita el entry BizChat y usa el
+  escenario de pago en StreamHub (1 test en `session-streamhub.test.ts`). Activado por
+  defecto, así que no cambia nuestro arranque.
 
 ### NO entró (y por qué)
 - `claude-fable` / `claude-fable-5.1`: en NUESTRA cuenta (incluida, no premium)
