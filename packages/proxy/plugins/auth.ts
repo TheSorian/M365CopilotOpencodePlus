@@ -5,20 +5,20 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const STATE = join(homedir(), ".config", "opencode-m365", "auth-notify.json");
-const COOLDOWN_MS = 10 * 60_000;
 
-/** Best-effort Telegram ping. Never let a notification failure break boot. */
+/**
+ * Notify on the FIRST failure of an outage only. systemd restarts a failed unit
+ * every 5s, so a per-restart ping would spam; and once the user knows the
+ * password changed, repeating the same message adds nothing. The flag clears
+ * itself on the next successful login, so a future outage gets its own ping.
+ * Best effort: a notification failure must never break proxy boot.
+ */
 function notifyAuthFailure(reason: string): void {
   if (process.env.M365_NO_AUTH_NOTIFY === "1") return;
-  // systemd restarts a failed unit every 5s: without a cooldown this would
-  // spam Telegram. One ping per 10 minutes is enough to act on it.
   try {
-    const now = Date.now();
-    let last = 0;
-    if (existsSync(STATE)) last = Number(JSON.parse(readFileSync(STATE, "utf8")).at) || 0;
-    if (now - last < COOLDOWN_MS) return;
+    if (existsSync(STATE) && JSON.parse(readFileSync(STATE, "utf8")).pending) return;
     mkdirSync(join(homedir(), ".config", "opencode-m365"), { recursive: true });
-    writeFileSync(STATE, JSON.stringify({ at: now }));
+    writeFileSync(STATE, JSON.stringify({ pending: true, at: Date.now() }));
   } catch {}
 
   const text =
@@ -33,6 +33,13 @@ function notifyAuthFailure(reason: string): void {
   } catch {}
 }
 
+/** A successful login re-arms the one-shot notification for the next outage. */
+function clearAuthFailure(): void {
+  try {
+    if (existsSync(STATE)) writeFileSync(STATE, JSON.stringify({ pending: false }));
+  } catch {}
+}
+
 /**
  * Authenticate against M365 once, at server startup. A failure here throws and
  * aborts boot — the equivalent of the old binary's `process.exit(1)` on auth
@@ -42,6 +49,7 @@ export default defineNitroPlugin(async () => {
   console.log("Authenticating...");
   try {
     await getToken();
+    clearAuthFailure();
   } catch (err: any) {
     const reason = String(err?.message ?? err);
     console.error(`Auth failed: ${reason}`);
