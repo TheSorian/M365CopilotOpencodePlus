@@ -7,14 +7,16 @@ import { homedir } from "node:os";
 const STATE = join(homedir(), ".config", "opencode-m365", "auth-notify.json");
 
 /**
- * Notify on the FIRST failure of an outage only. systemd restarts a failed unit
- * every 5s, so a per-restart ping would spam; and once the user knows the
- * password changed, repeating the same message adds nothing. The flag clears
- * itself on the next successful login, so a future outage gets its own ping.
+ * Notify on the FIRST failure of an outage only, when M365_AUTH_NOTIFY=1 is
+ * set (off by default so other hosts pulling main don't also send duplicate
+ * alerts). systemd restarts a failed unit every 5s, so a per-restart ping
+ * would spam; and once the user knows the password changed, repeating the same
+ * message adds nothing. The flag clears itself on the next successful login, so
+ * a future outage gets its own ping.
  * Best effort: a notification failure must never break proxy boot.
  */
 function notifyAuthFailure(reason: string): void {
-  if (process.env.M365_NO_AUTH_NOTIFY === "1") return;
+  if (process.env.M365_AUTH_NOTIFY !== "1") return;
   try {
     if (existsSync(STATE) && JSON.parse(readFileSync(STATE, "utf8")).pending) return;
     mkdirSync(join(homedir(), ".config", "opencode-m365"), { recursive: true });
