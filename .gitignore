@@ -44,3 +44,4 @@ scripts/harness/out/
 
 # OpenCode session exports that land in the repo root
 session-ses_*.md
+auto-update.log

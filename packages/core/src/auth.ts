@@ -194,8 +194,12 @@ async function fillVerified(
 ): Promise<void> {
   const loc = page.locator(`${selector}:visible`).first();
   await loc.waitFor({ state: "visible", timeout: 20000 });
-  await loc.click();
-  await loc.fill(value);
+  // The placeholder overlay intercepts pointer events on the email field, so a
+  // plain click can time out even though the input is visible (observed 2026-11-28).
+  await loc.fill(value, { timeout: 8000 }).catch(async () => {
+    await loc.click({ force: true });
+    await loc.fill(value);
+  });
   let got = await loc.inputValue();
   if (got !== value) {
     log.info(`${label}: fill mismatch (${got.length} chars), retyping`);
@@ -508,6 +512,188 @@ export async function loginAutomated(
 }
 
 /**
+ * Hybrid sign-in for federated IdPs (Okta/Ping/Duo) that own the MFA step.
+ *
+ * Unlike `loginAutomated`, there is no TOTP code to type: the IdP sends a push
+ * the human approves on their phone. Unlike `loginInteractiveForScopes`, the
+ * browser is HEADLESS and fills the email/password for the human — so no
+ * visible desktop is needed, only the push approval. The code capture is the
+ * same nativeclient redirect (H13.1): it carries the code one hop further than
+ * the settled URL, so it must be read from the navigation request.
+ *
+ * Enabled with M365_FEDERATED_LOGIN=1 and the usual stored credentials
+ * (email + password; mfaSecret is unused). The callers `getTokenForScope` and
+ * `doGetToken` prefer it over the Entra-only automated path when the flag is on.
+ */
+async function loginFederatedForScopes(scopes: string[]): Promise<string> {
+  const secrets = loadSecrets();
+  if (!secrets) throw new Error("Federated login needs secrets.json (email + password)");
+  const { chromium } = await import("playwright");
+  const app = getApp();
+  const timeoutMs = interactiveTimeoutMs();
+  const { authUrl, verifier } = await buildAuthUrlForScopes(app, scopes);
+
+  const context = await chromium.launchPersistentContext(BROWSER_PROFILE_DIR, {
+    headless: true,
+    executablePath: resolveChromiumPath(),
+    args: [
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled",
+    ],
+    userAgent: LOGIN_USER_AGENT,
+    locale: LOGIN_LOCALE,
+    timezoneId: LOGIN_TIMEZONE,
+    viewport: { width: 1280, height: 800 },
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+  const page = context.pages()[0] ?? (await context.newPage());
+
+  let resolveCode: (code: string) => void;
+  const codePromise = new Promise<string>((res) => {
+    resolveCode = res;
+  });
+  page.on("request", (req: any) => {
+    const u = req.url();
+    if (u.includes("/oauth2/nativeclient") && u.includes("code=")) {
+      const c = new URL(u).searchParams.get("code");
+      if (c) {
+        log.info("Captured auth code from nativeclient redirect (federated)");
+        resolveCode(c);
+      }
+    }
+  });
+
+  try {
+    console.error("[m365 auth] Federated login: filling credentials; approve the push in your authenticator app.");
+    console.error(`[m365 auth] Waiting up to ${Math.round(timeoutMs / 1000)}s for the approval.`);
+    await page.goto(authUrl, { waitUntil: "domcontentloaded" });
+
+    // Microsoft asks only for the email; submitting it federates to adif.okta.com,
+    // where the username is the EMPLOYEE NUMBER (not the email) and then the
+    // password. Observed live 2026-11-28: the Microsoft `passwd` page never appears.
+    if (await isVisibleSoon(page, 'input[name="loginfmt"]', 15_000)) {
+      await fillVerified(page, 'input[name="loginfmt"]', secrets.email, "email");
+      await page.locator("#idSIButton9:visible").first().click({ timeout: 8_000 }).catch(() => {});
+      log.info("Federated: submitted email, waiting for the Okta redirect");
+      console.error("[m365 auth] Email submitted; waiting for Okta.");
+    } else {
+      log.info("Federated: no email prompt (SSO cookie?), going straight to approval");
+    }
+
+    // Okta login widget: employee number + password. Poll for the IdP page —
+    // Microsoft's own `passwd` field is NOT part of this tenant's flow (it may
+    // flicker during the redirect), so never fill it; wait for adif.okta.com.
+    const oktaUser = secrets.username ?? secrets.email;
+    let oktaDone = false;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline && !oktaDone) {
+      if (/okta\.com/i.test(page.url())) {
+        // Okta identity-engine widget (adif.okta.com, observed 2026-11-28):
+        // username = input[name=identifier], password = input[name=credentials.passcode],
+        // submit = input[type=submit][value="Sign in"].
+        const userSel = 'input[name="identifier"]:visible';
+        const passSel = 'input[name="credentials.passcode"]:visible';
+        const submitSel = 'input[type="submit"][value="Sign in"]:visible';
+        if (await isVisibleSoon(page, userSel, 5_000)) {
+          await fillVerified(page, userSel, oktaUser, "Okta username");
+        }
+        if (await isVisibleSoon(page, passSel, 5_000)) {
+          await fillVerified(page, passSel, secrets.password, "Okta password");
+        }
+        const submitted = await page
+          .locator(submitSel)
+          .first()
+          .click({ timeout: 6_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!submitted) await page.locator(passSel).first().press("Enter").catch(() => {});
+        log.info("Federated: submitted employee number + password on Okta");
+        console.error("[m365 auth] Okta credentials submitted; approve the push on your phone.");
+        oktaDone = true;
+      } else {
+        await page.waitForTimeout(1_000);
+      }
+    }
+    if (!oktaDone) {
+      log.info("Federated: Okta page never appeared — waiting for the OAuth code anyway");
+    }
+
+    // Okta MFA: choose "Get a push notification" so the phone gets the prompt
+    // without anyone driving the browser. The other options (email / enter a
+    // code) need a human at the page; push is the one that fits a headless host.
+    const pushPicked = await (async () => {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        // Case A: Okta remembered the method — it is already waiting for the
+        // push ("Waiting for your approval"), no option list to click.
+        const waiting = await page
+          .getByText(/Waiting for your approval|Waiting for approval|Verify your identity/i)
+          .first()
+          .isVisible()
+          .catch(() => false);
+        if (waiting) {
+          log.info("Federated: Okta already waiting for the push (no method picker)");
+          console.error("[m365 auth] Okta is already pushing — approve it on your phone.");
+          return true;
+        }
+        // Case B: method picker shown — click the anchor inside the
+        // [data-se="okta_verify-push"] row (verified from the live page HTML).
+        const pushRow = page.locator('[data-se="okta_verify-push"]:visible').first();
+        if (await pushRow.isVisible().catch(() => false)) {
+          await pushRow.locator('a.select-factor').first().click({ timeout: 5_000 }).catch(() => {});
+          log.info("Federated: selected Okta push notification");
+          console.error("[m365 auth] Push notification requested — approve it on your phone.");
+          return true;
+        }
+        // Fallback for a differently-rendered picker: the option's own text.
+        const btn = page.getByText("Get a push notification", { exact: true }).first();
+        if (await btn.isVisible().catch(() => false)) {
+          await btn.click({ timeout: 5_000 }).catch(() => {});
+          log.info("Federated: clicked the push option by text");
+          console.error("[m365 auth] Push notification requested — approve it on your phone.");
+          return true;
+        }
+        await page.waitForTimeout(1_000);
+      }
+      return false;
+    })();
+    if (!pushPicked) log.info("Federated: no push option found (already approved?)");
+
+    // Give the push a moment to settle before we start waiting for the code.
+    await page.waitForTimeout(1_000);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const authCode = await Promise.race([
+      codePromise,
+      new Promise<string>((_, rej) => {
+        timer = setTimeout(
+          () => rej(new Error(`Timed out waiting for federated auth code after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
+
+    const result = await app.acquireTokenByCode({
+      code: authCode,
+      scopes,
+      redirectUri: REDIRECT_URI,
+      codeVerifier: verifier,
+    });
+    saveCache(app);
+    log.info(`Federated login succeeded as ${result.account?.username}`);
+    return result.accessToken;
+  } catch (err: any) {
+    await capture(page, "federated-fail");
+    throw err;
+  } finally {
+    await context.close();
+  }
+}
+
+/**
  * User-driven sign-in for tenants the stored-credentials path cannot serve (§13):
  * software-OATH disabled by policy, push/number-matching-only MFA, FIDO2, Windows
  * Hello, or federation to Okta/Ping/Duo. There is no base32 seed to extract in any
@@ -669,11 +855,19 @@ export function loadSecrets(): {
   email: string;
   password: string;
   mfaSecret: string;
+  username?: string;
 } | null {
   if (!existsSync(SECRETS_FILE)) return null;
   try {
     const data = JSON.parse(readFileSync(SECRETS_FILE, "utf-8"));
-    if (data.email && data.password && data.mfaSecret) return data;
+    // mfaSecret is optional for federated IdPs (Okta/Ping/Duo own the MFA step),
+    // but the Entra-only automated path still needs it: pass a sentinel that
+    // makes the TOTP step fail fast rather than hang when there's no seed.
+    // `username` is the IdP login (e.g. Okta employee number), when it differs
+    // from the email.
+    if (data.email && data.password) {
+      return { email: data.email, password: data.password, mfaSecret: data.mfaSecret ?? "", username: data.username };
+    }
   } catch {}
   return null;
 }
@@ -700,7 +894,9 @@ export async function getTokenForScope(scopes: string[]): Promise<string | null>
   // then to a human if that's enabled (§13).
   const secrets = loadSecrets();
   const canPromptHuman = interactiveApprovalEnabled() && interactiveAllowed();
+  const federated = process.env.M365_FEDERATED_LOGIN === "1";
   if (!secrets) return canPromptHuman ? loginInteractiveForScopes(scopes) : null;
+  if (federated) return loginFederatedForScopes(scopes);
   try {
     return await runBrowserLogin(app, scopes, secrets);
   } catch (err: any) {
@@ -728,6 +924,9 @@ async function doGetToken(): Promise<string> {
   }
 
   const secrets = loadSecrets();
+  // Federated IdPs (Okta/Ping/Duo) own the MFA step: fill credentials headlessly
+  // and wait only for the push, instead of trying to type a TOTP that doesn't exist.
+  const federated = process.env.M365_FEDERATED_LOGIN === "1";
   // Automated (headless) login by default. A headless host (systemd, CI, second
   // PC) must fail LOUDLY rather than hang on an invisible prompt or pop a browser
   // tab — so the human-in-the-loop path stays strictly opt-in via
@@ -740,6 +939,7 @@ async function doGetToken(): Promise<string> {
       "No cached token and no secrets.json — cannot authenticate. Provide email/password/mfaSecret for automated login, or set M365_ENABLE_INTERACTIVE_APPROVAL=1 to sign in by hand in a visible browser (needed for tenants without TOTP: push-only MFA, FIDO2, Okta/Ping/Duo).",
     );
   }
+  if (federated) return loginFederatedForScopes(SCOPES);
   if (!canPromptHuman) {
     return loginAutomated(secrets.email, secrets.password, secrets.mfaSecret);
   }
